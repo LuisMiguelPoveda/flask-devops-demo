@@ -1,0 +1,21 @@
+{
+  "name": "flask-devops-demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "build-css": "sass app/static/scss:app/static/css --no-source-map --style=compressed",
+    "watch-css": "sass app/static/scss:app/static/css --watch --no-source-map"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "sass": "^1.95.0"
+  }
+}
+

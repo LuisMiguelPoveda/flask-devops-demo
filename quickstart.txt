@@ -1,0 +1,5 @@
+(in project folder)
+source .venv/bin/activate
+export FLASK_APP=app
+export FLASK_RUN_HOST=0.0.0.0
+flask run
