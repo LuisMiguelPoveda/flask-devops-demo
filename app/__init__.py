@@ -65,6 +65,31 @@ def create_app():
     def logout():
         logout_user()
         return redirect(url_for("login"))
+    
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        if request.method == "POST":
+            username = request.form.get("username")
+            password = request.form.get("password")
+
+            # Check if user exists
+            existing = User.query.filter_by(username=username).first()
+            if existing:
+                flash("Username already taken", "error")
+                return redirect(url_for("register"))
+
+            # Create user
+            hashed_pw = generate_password_hash(password)
+            new_user = User(username=username, password_hash=hashed_pw)
+            db.session.add(new_user)
+            db.session.commit()
+
+            # Auto-login after registration
+            login_user(new_user)
+
+            return redirect(url_for("dashboard"))
+
+        return render_template("register.html")
 
     return app
 
