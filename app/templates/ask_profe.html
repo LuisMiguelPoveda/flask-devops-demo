@@ -5,13 +5,25 @@
 {% block content %}
   <section class="ask-profe">
     <h2>Pregúntale al profe</h2>
-    <p>Escribe tu duda y el profe te responderá.</p>
+    <p>Escribe tu duda, elige un modelo y el profe te responderá.</p>
 
     <form method="post" class="ask-form">
+      <div>
+        <label for="model">Modelo</label>
+        <select id="model" name="model">
+          {% for model in models %}
+            <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
+              {{ model }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
       <div>
         <label for="question">Tu pregunta</label>
         <textarea id="question" name="question" rows="4" required></textarea>
       </div>
+
       <button type="submit">Enviar</button>
     </form>
 

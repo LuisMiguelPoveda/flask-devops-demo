@@ -1,6 +1,2 @@
-(in project folder)
-source .venv/bin/activate
-export FLASK_APP=app
-export FLASK_RUN_HOST=0.0.0.0
-flask run
-(deprecated now docker works)
+docker build -t flask-devops-demo .
+docker run --rm --network host   flask-devops-demo
