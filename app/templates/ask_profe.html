@@ -7,7 +7,7 @@
     <h2>Pregúntale al profe</h2>
     <p>Escribe tu duda, elige un modelo y el profe te responderá.</p>
 
-    <form method="post" class="ask-form">
+    <form method="post" class="ask-form" id="ask-form">
       <div>
         <label for="model">Modelo</label>
         <select id="model" name="model">
@@ -24,13 +24,18 @@
         <textarea id="question" name="question" rows="4" required></textarea>
       </div>
 
-      <button type="submit">Enviar</button>
+      <button type="submit" id="submit-btn">Enviar</button>
     </form>
 
+    <!-- Indicador de carga -->
+    <div id="loading-indicator" style="display: none; margin-top: 1rem;">
+      <em>El profe está pensando... ⏳</em>
+    </div>
+
     {% if messages %}
-      <div class="chat">
+      <div class="chat" style="margin-top: 2rem;">
         {% for msg in messages %}
-          <div class="chat-message {{ msg.role }}">
+          <div class="chat-message {{ msg.role }}" style="margin-bottom: 0.75rem;">
             <strong>
               {% if msg.role == 'user' %}Tú{% else %}Profe{% endif %}:
             </strong>
@@ -40,4 +45,21 @@
       </div>
     {% endif %}
   </section>
+
+  <script>
+    // JS sencillo para mostrar el "loading" cuando se envía el formulario
+    const form = document.getElementById("ask-form");
+    const loading = document.getElementById("loading-indicator");
+    const submitBtn = document.getElementById("submit-btn");
+
+    if (form && loading && submitBtn) {
+      form.addEventListener("submit", function () {
+        // mostrar indicador
+        loading.style.display = "block";
+        // desactivar botón para evitar envíos dobles
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Enviando...";
+      });
+    }
+  </script>
 {% endblock %}
