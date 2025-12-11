@@ -17,14 +17,8 @@ from .models import db, User
 def create_app():
     app = Flask(__name__)
 
-        # LM Studio config (URL/model overridable by env vars)
-    app.config["LMSTUDIO_API_BASE"] = os.getenv(
-        "LMSTUDIO_API_BASE", "http://host.docker.internal:1234/v1"
-    )
-    app.config["LMSTUDIO_MODEL"] = os.getenv(
-        "LMSTUDIO_MODEL", "your-lmstudio-model-name"
-    )
-
+    app.config["LMSTUDIO_API_BASE"] = os.getenv("LMSTUDIO_API_BASE", "http://127.0.0.1:1234/v1")
+    app.config["LMSTUDIO_MODEL"] = os.getenv("LMSTUDIO_MODEL", "google/gemma-3-1b")
 
     # Basic config
     app.config["SECRET_KEY"] = "change-me-in-production"
