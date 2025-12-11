@@ -1,3 +1,6 @@
+import os
+import requests
+
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_login import (
     LoginManager,
@@ -13,6 +16,15 @@ from .models import db, User
 
 def create_app():
     app = Flask(__name__)
+
+        # LM Studio config (URL/model overridable by env vars)
+    app.config["LMSTUDIO_API_BASE"] = os.getenv(
+        "LMSTUDIO_API_BASE", "http://host.docker.internal:1234/v1"
+    )
+    app.config["LMSTUDIO_MODEL"] = os.getenv(
+        "LMSTUDIO_MODEL", "your-lmstudio-model-name"
+    )
+
 
     # Basic config
     app.config["SECRET_KEY"] = "change-me-in-production"
@@ -59,7 +71,7 @@ def create_app():
     @login_required
     def dashboard():
         return render_template("dashboard.html", username=current_user.username)
-
+    
     @app.route("/logout")
     @login_required
     def logout():
@@ -90,6 +102,47 @@ def create_app():
             return redirect(url_for("dashboard"))
 
         return render_template("register.html")
+    
+    @app.route("/ask-profe", methods=["GET", "POST"])
+    @login_required
+    def ask_profe():
+        messages = []
+
+        if request.method == "POST":
+            question = request.form.get("question", "").strip()
+
+            if question:
+                try:
+                    payload = {
+                        "model": app.config["LMSTUDIO_MODEL"],
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "Actúa como un profesor paciente y claro.",
+                            },
+                            {"role": "user", "content": question},
+                        ],
+                        "temperature": 0.7,
+                    }
+
+                    api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
+                    resp = requests.post(
+                        f"{api_base}/chat/completions",
+                        json=payload,
+                        timeout=30,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    answer = data["choices"][0]["message"]["content"]
+                except Exception as e:
+                    answer = f"Error al hablar con LM Studio: {e}"
+
+                messages = [
+                    {"role": "user", "content": question},
+                    {"role": "assistant", "content": answer},
+                ]
+
+        return render_template("ask_profe.html", messages=messages)
 
     return app
 

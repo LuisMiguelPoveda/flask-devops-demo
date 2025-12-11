@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}Menú principal{% endblock %}
 
 {% block content %}
-  <section class="dashboard">
-    <h2>Welcome, {{ username }}!</h2>
-    <p>You are now logged in.</p>
-    <a href="{{ url_for('logout') }}">Logout</a>
+  <section class="menu">
+    <h2>Hola, {{ username }} 👋</h2>
+    <p>Elige una opción:</p>
+
+    <ul class="menu-list">
+      <li>
+        <a href="{{ url_for('ask_profe') }}">Pregúntale al profe</a>
+      </li>
+      <!-- Más opciones aquí en el futuro -->
+      <!-- <li><a href="#">Ver apuntes</a></li> -->
+    </ul>
   </section>
 {% endblock %}

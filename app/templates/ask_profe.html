@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Pregúntale al profe{% endblock %}
+
+{% block content %}
+  <section class="ask-profe">
+    <h2>Pregúntale al profe</h2>
+    <p>Escribe tu duda y el profe te responderá.</p>
+
+    <form method="post" class="ask-form">
+      <div>
+        <label for="question">Tu pregunta</label>
+        <textarea id="question" name="question" rows="4" required></textarea>
+      </div>
+      <button type="submit">Enviar</button>
+    </form>
+
+    {% if messages %}
+      <div class="chat">
+        {% for msg in messages %}
+          <div class="chat-message {{ msg.role }}">
+            <strong>
+              {% if msg.role == 'user' %}Tú{% else %}Profe{% endif %}:
+            </strong>
+            <p>{{ msg.content }}</p>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}
