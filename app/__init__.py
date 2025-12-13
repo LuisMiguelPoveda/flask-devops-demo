@@ -98,12 +98,12 @@ def create_app():
             return redirect(url_for("dashboard"))
 
         if request.method == "POST":
-            username = request.form.get("username")
-            password = request.form.get("password")
+            username = (request.form.get("username") or "").strip()
+            password = request.form.get("password") or ""
 
             user = User.query.filter_by(username=username).first()
 
-            if user and check_password_hash(user.password_hash, password):
+            if user and password and check_password_hash(user.password_hash, password):
                 login_user(user)
                 return redirect(url_for("dashboard"))
 
@@ -117,15 +117,25 @@ def create_app():
             return redirect(url_for("dashboard"))
 
         if request.method == "POST":
-            username = request.form.get("username")
-            password = request.form.get("password")
+            username = (request.form.get("username") or "").strip()
+            password = request.form.get("password") or ""
+
+            if not username or not password:
+                flash("Rellena usuario y contraseña.", "error")
+                return redirect(url_for("register"))
 
             existing = User.query.filter_by(username=username).first()
             if existing:
                 flash("Ese usuario ya existe.", "error")
                 return redirect(url_for("register"))
 
-            hashed_pw = generate_password_hash(password)
+            # ✅ Hash correcto y estable (PBKDF2 + salt)
+            hashed_pw = generate_password_hash(
+                password,
+                method="pbkdf2:sha256",
+                salt_length=16,
+            )
+
             new_user = User(username=username, password_hash=hashed_pw)
             db.session.add(new_user)
             db.session.commit()
