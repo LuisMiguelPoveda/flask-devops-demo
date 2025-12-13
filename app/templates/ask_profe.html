@@ -3,13 +3,13 @@
 {% block title %}Pregúntale al profe{% endblock %}
 
 {% block content %}
-  <section class="ask-profe">
+  <div class="card">
     <h2>Pregúntale al profe</h2>
     <p>Escribe tu duda, elige un modelo y el profe te responderá.</p>
 
-    <form method="post" class="ask-form" id="ask-form">
-      <div style="margin-bottom: 1rem;">
-        <label for="model">Modelo</label><br />
+    <form method="post" id="ask-form">
+      <div>
+        <label for="model">Modelo</label>
         <select id="model" name="model">
           {% for model in models %}
             <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
@@ -19,32 +19,32 @@
         </select>
       </div>
 
-      <div style="margin-bottom: 1rem;">
-        <label for="question">Tu pregunta</label><br />
-        <textarea id="question" name="question" rows="5" style="width: 100%;" required></textarea>
+      <div>
+        <label for="question">Tu pregunta</label>
+        <textarea id="question" name="question" rows="5" required></textarea>
       </div>
 
-      <button type="submit" id="submit-btn">Enviar</button>
-      <a href="{{ url_for('dashboard') }}" style="margin-left: 1rem;">Volver al menú</a>
+      <div style="display:flex; gap: 10px; align-items:center;">
+        <button type="submit" id="submit-btn">Enviar</button>
+        <a href="{{ url_for('dashboard') }}">Volver al menú</a>
+      </div>
     </form>
 
-    <div id="loading-indicator" style="display: none; margin-top: 1rem;">
+    <div id="loading-indicator" style="display:none; margin-top: 12px;">
       <em>El profe está pensando... ⏳</em>
     </div>
 
     {% if messages %}
-      <div class="chat" style="margin-top: 2rem;">
+      <div class="chat">
         {% for msg in messages %}
-          <div class="chat-message {{ msg.role }}" style="margin-bottom: 0.75rem;">
-            <strong>
-              {% if msg.role == 'user' %}Tú{% else %}Profe{% endif %}:
-            </strong>
-            <p style="white-space: pre-wrap;">{{ msg.content }}</p>
+          <div class="chat-message {{ msg.role }}">
+            <strong>{% if msg.role == 'user' %}Tú{% else %}Profe{% endif %}:</strong>
+            <p>{{ msg.content }}</p>
           </div>
         {% endfor %}
       </div>
     {% endif %}
-  </section>
+  </div>
 
   <script>
     const form = document.getElementById("ask-form");
