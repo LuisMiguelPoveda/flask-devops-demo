@@ -1,24 +1,29 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="utf-8" />
-    <title>{% block title %}ADNME{% endblock %}</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/main.css') }}"
-    />
-  </head>
-  <body>
-    <header>
-      <h1>ADNME</h1>
-    </header>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}App{% endblock %}</title>
 
-    <main>
+    {# Si tienes CSS compilado, ajusta el nombre #}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  </head>
+
+  <body>
+    <main style="max-width: 900px; margin: 0 auto; padding: 1rem;">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-messages" style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+              <div class="flash {{ category }}" style="padding: 0.75rem; border: 1px solid #ddd; margin-bottom: 0.5rem;">
+                {{ message }}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
       {% block content %}{% endblock %}
     </main>
-
-    <footer>
-      <small>CI/CD Flask + Docker study aid for ADD students</small>
-    </footer>
   </body>
 </html>

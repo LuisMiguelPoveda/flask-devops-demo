@@ -1,5 +1,6 @@
 import os
 import requests
+from requests.exceptions import Timeout, RequestException
 
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_login import (
@@ -16,11 +17,11 @@ from .models import db, User
 
 def fetch_models(app):
     """
-    Ask LM Studio for the list of available models via /v1/models.
-    Returns a list of model IDs (strings).
+    Obtiene la lista de modelos disponibles desde LM Studio:
+      GET {LMSTUDIO_API_BASE}/models
 
-    If something goes wrong (LM Studio down, no endpoint, etc.),
-    falls back to a list containing only the default LMSTUDIO_MODEL.
+    Devuelve lista de IDs de modelos. Si falla, devuelve el modelo por defecto.
+    Filtra modelos de embeddings (por comodidad).
     """
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     try:
@@ -28,49 +29,42 @@ def fetch_models(app):
         resp.raise_for_status()
         data = resp.json()
 
-        # Extract model IDs from the "data" list
         all_ids = [m["id"] for m in data.get("data", [])]
 
-        # Optional: filter out embedding-only models
-        models = [
-            mid
-            for mid in all_ids
-            if not mid.startswith("text-embedding-")
-        ]
+        # Filtrar modelos de embeddings (opcional)
+        models = [mid for mid in all_ids if not mid.startswith("text-embedding-")]
 
-        # Fallback to default model if list is empty
         if not models:
             models = [app.config["LMSTUDIO_MODEL"]]
 
         return models
-
     except Exception:
-        # If anything fails (LM Studio down, etc.), just use the default model
         return [app.config["LMSTUDIO_MODEL"]]
 
 
 def create_app():
     app = Flask(__name__)
 
-    # ---- LM Studio config ----
-    # For your Linux laptop + Docker-only workflow:
-    # - If you use `--network host`, localhost (127.0.0.1) works fine.
-    # - If you switch to host.docker.internal, override LMSTUDIO_API_BASE via env var.
+    # --- Config LM Studio (para tu flujo Docker + --network host) ---
     app.config["LMSTUDIO_API_BASE"] = os.getenv(
         "LMSTUDIO_API_BASE",
-        "http://127.0.0.1:1234/v1",  # LM Studio local server default
+        "http://127.0.0.1:1234/v1",
     )
     app.config["LMSTUDIO_MODEL"] = os.getenv(
         "LMSTUDIO_MODEL",
         "google/gemma-3-1b",
     )
+    app.config["LMSTUDIO_TIMEOUT"] = int(os.getenv("LMSTUDIO_TIMEOUT", "300"))
 
-    # ---- Basic app config ----
-    app.config["SECRET_KEY"] = "change-me-in-production"
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app.db"
+    # --- Config app / DB ---
+    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+        "SQLALCHEMY_DATABASE_URI",
+        "sqlite:///app.db",
+    )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    # ---- Init extensions ----
+    # --- Extensiones ---
     db.init_app(app)
 
     login_manager = LoginManager()
@@ -81,11 +75,22 @@ def create_app():
     def load_user(user_id):
         return User.query.get(int(user_id))
 
-    # Create tables if they don't exist (fine for dev / small projects)
+    # Crear tablas (ok para dev/proyecto pequeño)
     with app.app_context():
         db.create_all()
 
-    # ---------- Routes ----------
+    # --- Error handler global ---
+    @app.errorhandler(500)
+    def internal_error(_error):
+        flash(
+            "Lo siento, ha ocurrido un error interno. "
+            "Vuelve a intentarlo en unos momentos.",
+            "error",
+        )
+        # Si no está logueado, acabará en login por @login_required en dashboard
+        return redirect(url_for("dashboard"))
+
+    # ---------- Rutas ----------
 
     @app.route("/", methods=["GET", "POST"])
     def login():
@@ -101,10 +106,34 @@ def create_app():
             if user and check_password_hash(user.password_hash, password):
                 login_user(user)
                 return redirect(url_for("dashboard"))
-            else:
-                flash("Invalid username or password", "error")
+
+            flash("Usuario o contraseña incorrectos.", "error")
 
         return render_template("login.html")
+
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        if current_user.is_authenticated:
+            return redirect(url_for("dashboard"))
+
+        if request.method == "POST":
+            username = request.form.get("username")
+            password = request.form.get("password")
+
+            existing = User.query.filter_by(username=username).first()
+            if existing:
+                flash("Ese usuario ya existe.", "error")
+                return redirect(url_for("register"))
+
+            hashed_pw = generate_password_hash(password)
+            new_user = User(username=username, password_hash=hashed_pw)
+            db.session.add(new_user)
+            db.session.commit()
+
+            login_user(new_user)
+            return redirect(url_for("dashboard"))
+
+        return render_template("register.html")
 
     @app.route("/dashboard")
     @login_required
@@ -117,38 +146,11 @@ def create_app():
         logout_user()
         return redirect(url_for("login"))
 
-    @app.route("/register", methods=["GET", "POST"])
-    def register():
-        if request.method == "POST":
-            username = request.form.get("username")
-            password = request.form.get("password")
-
-            # Check if user exists
-            existing = User.query.filter_by(username=username).first()
-            if existing:
-                flash("Username already taken", "error")
-                return redirect(url_for("register"))
-
-            # Create user
-            hashed_pw = generate_password_hash(password)
-            new_user = User(username=username, password_hash=hashed_pw)
-            db.session.add(new_user)
-            db.session.commit()
-
-            # Auto-login after registration
-            login_user(new_user)
-
-            return redirect(url_for("dashboard"))
-
-        return render_template("register.html")
-
     @app.route("/ask-profe", methods=["GET", "POST"])
     @login_required
     def ask_profe():
-        # Get available models from LM Studio (or fallback to default)
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
-
         messages = []
 
         if request.method == "POST":
@@ -173,18 +175,40 @@ def create_app():
                     resp = requests.post(
                         f"{api_base}/chat/completions",
                         json=payload,
-                        timeout=300,
+                        timeout=app.config["LMSTUDIO_TIMEOUT"],
                     )
                     resp.raise_for_status()
                     data = resp.json()
-                    answer = data["choices"][0]["message"]["content"]
-                except Exception as e:
-                    answer = f"Error al hablar con LM Studio: {e}"
 
-                messages = [
-                    {"role": "user", "content": question},
-                    {"role": "assistant", "content": answer},
-                ]
+                    answer = data["choices"][0]["message"]["content"]
+
+                    messages = [
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": answer},
+                    ]
+
+                except Timeout:
+                    flash(
+                        "Lo siento, el modelo ha tardado demasiado en responder. "
+                        "Prueba otra vez o usa una pregunta más corta.",
+                        "error",
+                    )
+                    return redirect(url_for("dashboard"))
+
+                except RequestException:
+                    flash(
+                        "Lo siento, no he podido conectar con LM Studio. "
+                        "Asegúrate de que el servidor local está encendido.",
+                        "error",
+                    )
+                    return redirect(url_for("dashboard"))
+
+                except Exception:
+                    flash(
+                        "Lo siento, ha ocurrido un error inesperado procesando tu pregunta.",
+                        "error",
+                    )
+                    return redirect(url_for("dashboard"))
 
         return render_template(
             "ask_profe.html",
@@ -196,5 +220,5 @@ def create_app():
     return app
 
 
-# So `flask run` still works without extra config
+# Para que `flask run` funcione también
 app = create_app()
