@@ -5,25 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}App{% endblock %}</title>
 
-    {# Si tienes CSS compilado, ajusta el nombre #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   </head>
 
   <body>
-    <main style="max-width: 900px; margin: 0 auto; padding: 1rem;">
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="flash-messages" style="margin-bottom: 1rem;">
-            {% for category, message in messages %}
-              <div class="flash {{ category }}" style="padding: 0.75rem; border: 1px solid #ddd; margin-bottom: 0.5rem;">
-                {{ message }}
-              </div>
-            {% endfor %}
-          </div>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <a class="brand" href="{{ url_for('dashboard') }}">Flask DevOps Demo</a>
+        {% if current_user.is_authenticated %}
+          <nav class="topbar__nav">
+            <a href="{{ url_for('dashboard') }}">Menú</a>
+            <a href="{{ url_for('logout') }}">Salir</a>
+          </nav>
         {% endif %}
-      {% endwith %}
+      </div>
+    </header>
 
-      {% block content %}{% endblock %}
+    <main class="page">
+      <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flash-stack">
+              {% for category, message in messages %}
+                <div class="flash flash--{{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+      </div>
     </main>
   </body>
 </html>
