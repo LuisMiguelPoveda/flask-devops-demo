@@ -1,5 +1,4 @@
 import os
-import base64
 from datetime import datetime
 
 import requests
@@ -19,7 +18,25 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .models import db, User, Subject, Note
 
 
+# ✅ Solo TXT
+ALLOWED_EXTENSIONS = {"txt"}
+
+# ✅ Límite duro de subida (bytes) — evita que llegue algo enorme
+MAX_UPLOAD_BYTES = 250 * 1024  # 250 KB
+
+# ✅ Límite “texto” que mandamos al modelo (caracteres)
+MAX_TEXT_CHARS = 30_000
+
+
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
 def fetch_models(app):
+    """
+    Lista modelos disponibles en LM Studio (/v1/models).
+    Si falla, devuelve el modelo por defecto.
+    """
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     try:
         resp = requests.get(f"{api_base}/models", timeout=5)
@@ -29,37 +46,30 @@ def fetch_models(app):
         all_ids = [m["id"] for m in data.get("data", [])]
         models = [mid for mid in all_ids if not mid.startswith("text-embedding-")]
 
-        if not models:
-            models = [app.config["LMSTUDIO_MODEL"]]
-
-        return models
+        return models or [app.config["LMSTUDIO_MODEL"]]
     except Exception:
         return [app.config["LMSTUDIO_MODEL"]]
 
 
-def lmstudio_summarize_file(app, model: str, subject: str, exam_date: str, filename: str, file_bytes: bytes) -> str:
+def lmstudio_summarize_text(app, model: str, subject: str, exam_date: str, filename: str, text: str) -> str:
     """
-    Sin preprocesado: enviamos el archivo tal cual (base64 dentro del prompt).
-    El modelo se encarga de leerlo.
+    Envía SOLO TEXTO al modelo (estable y compatible con /chat/completions).
     """
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     timeout_s = app.config["LMSTUDIO_TIMEOUT"]
 
-    b64 = base64.b64encode(file_bytes).decode("ascii")
-
     system_prompt = (
-        "Eres un profesor experto. Devuelve un resumen con la información clave, "
+        "Eres un profesor experto. Devuelve un resumen con la información clave "
         "en español, en formato de viñetas (bullet points) y con estructura clara. "
-        "No inventes información. No incluyas introducciones ni despedidas."
+        "No inventes información. No incluyas introducción ni despedida."
     )
 
     user_prompt = (
         f"Asignatura: {subject}\n"
         f"Fecha de evaluación: {exam_date}\n"
-        f"Nombre del archivo: {filename}\n\n"
-        "El siguiente contenido es un archivo codificado en base64. "
-        "Léelo (según su tipo) y genera un resumen con lo más importante.\n\n"
-        f"ARCHIVO_BASE64:\n{b64}"
+        f"Archivo: {filename}\n\n"
+        "TEXTO A RESUMIR:\n"
+        f"{text}"
     )
 
     payload = {
@@ -85,17 +95,26 @@ def create_app():
     app = Flask(__name__)
 
     # --- Config LM Studio ---
-    app.config["LMSTUDIO_API_BASE"] = os.getenv("LMSTUDIO_API_BASE", "http://127.0.0.1:1234/v1")
-    app.config["LMSTUDIO_MODEL"] = os.getenv("LMSTUDIO_MODEL", "google/gemma-3-1b")
+    app.config["LMSTUDIO_API_BASE"] = os.getenv(
+        "LMSTUDIO_API_BASE",
+        "http://127.0.0.1:1234/v1",
+    )
+    app.config["LMSTUDIO_MODEL"] = os.getenv(
+        "LMSTUDIO_MODEL",
+        "google/gemma-3-1b",
+    )
     app.config["LMSTUDIO_TIMEOUT"] = int(os.getenv("LMSTUDIO_TIMEOUT", "300"))
 
     # --- Config app / DB ---
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.db")
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+        "SQLALCHEMY_DATABASE_URI",
+        "sqlite:///app.db",
+    )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    # opcional: límite de subida (20MB)
-    app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+    # ✅ límite duro por Flask/Werkzeug
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
     # --- Extensiones ---
     db.init_app(app)
@@ -111,7 +130,7 @@ def create_app():
     with app.app_context():
         db.create_all()
 
-    # ---------- Rutas ----------
+    # ---------- Rutas auth ----------
 
     @app.route("/", methods=["GET", "POST"])
     def login():
@@ -160,16 +179,20 @@ def create_app():
 
         return render_template("register.html")
 
-    @app.route("/dashboard")
-    @login_required
-    def dashboard():
-        return render_template("dashboard.html", username=current_user.username)
-
     @app.route("/logout")
     @login_required
     def logout():
         logout_user()
         return redirect(url_for("login"))
+
+    # ---------- Dashboard ----------
+
+    @app.route("/dashboard")
+    @login_required
+    def dashboard():
+        return render_template("dashboard.html", username=current_user.username)
+
+    # ---------- Ask Profe ----------
 
     @app.route("/ask-profe", methods=["GET", "POST"])
     @login_required
@@ -204,7 +227,6 @@ def create_app():
                     )
                     resp.raise_for_status()
                     data = resp.json()
-
                     answer = data["choices"][0]["message"]["content"]
 
                     messages = [
@@ -213,7 +235,7 @@ def create_app():
                     ]
 
                 except Timeout:
-                    flash("Lo siento, el modelo ha tardado demasiado en responder.", "error")
+                    flash("El modelo tardó demasiado en responder.", "error")
                     return redirect(url_for("dashboard"))
                 except RequestException:
                     flash("No he podido conectar con LM Studio. ¿Está encendido?", "error")
@@ -229,7 +251,8 @@ def create_app():
             selected_model=selected_model,
         )
 
-    # -------- API fechas de evaluación existentes por asignatura --------
+    # ---------- API: fechas existentes por asignatura ----------
+
     @app.route("/api/exam-dates")
     @login_required
     def api_exam_dates():
@@ -255,18 +278,20 @@ def create_app():
         dates = [r[0].isoformat() for r in rows if r[0] is not None]
         return jsonify({"dates": dates})
 
-    # -------- Generar resumen / Añadir apuntes --------
+    # ---------- Generar resumen (TXT) ----------
+
     @app.route("/add-notes", methods=["GET", "POST"])
     @login_required
     def add_notes():
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
+
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
 
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
 
-            # --- Asignatura ---
+            # ---- Asignatura: elegir o crear ----
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
 
@@ -292,7 +317,7 @@ def create_app():
                     flash("Asignatura inválida.", "error")
                     return redirect(url_for("add_notes"))
 
-            # --- Fecha evaluación ---
+            # ---- Fecha evaluación: existente o manual ----
             exam_str = (
                 (request.form.get("exam_date_manual") or "").strip()
                 or (request.form.get("exam_date_choice") or "").strip()
@@ -306,10 +331,14 @@ def create_app():
                     flash("Formato de fecha inválido. Usa YYYY-MM-DD.", "error")
                     return redirect(url_for("add_notes"))
 
-            # --- Archivo ---
+            # ---- Archivo TXT ----
             upload = request.files.get("file")
             if not upload or not upload.filename:
-                flash("Selecciona un archivo.", "error")
+                flash("Selecciona un archivo .txt.", "error")
+                return redirect(url_for("add_notes"))
+
+            if not allowed_file(upload.filename):
+                flash("Solo se permiten archivos .txt.", "error")
                 return redirect(url_for("add_notes"))
 
             filename = secure_filename(upload.filename)
@@ -319,16 +348,35 @@ def create_app():
                 flash("El archivo está vacío.", "error")
                 return redirect(url_for("add_notes"))
 
-            # --- LLM resumen ---
+            if len(file_bytes) > MAX_UPLOAD_BYTES:
+                flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
+                return redirect(url_for("add_notes"))
+
+            # Convertir a texto (robusto)
+            try:
+                text = file_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                text = file_bytes.decode("utf-8", errors="ignore")
+
+            text = text.strip()
+            if not text:
+                flash("El TXT no contiene texto legible.", "error")
+                return redirect(url_for("add_notes"))
+
+            # Capar texto enviado al modelo (evita errores por tamaño)
+            if len(text) > MAX_TEXT_CHARS:
+                text = text[:MAX_TEXT_CHARS]
+
+            # ---- LLM resumen ----
             try:
                 exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
-                summary = lmstudio_summarize_file(
+                summary = lmstudio_summarize_text(
                     app,
                     selected_model,
                     subject.name,
                     exam_date_str,
                     filename,
-                    file_bytes,
+                    text,
                 )
             except Timeout:
                 flash("El modelo tardó demasiado en responder.", "error")
@@ -362,6 +410,8 @@ def create_app():
             subjects=subjects,
             models=available_models,
             selected_model=selected_model,
+            max_kb=MAX_UPLOAD_BYTES // 1024,
+            max_chars=MAX_TEXT_CHARS,
         )
 
     return app

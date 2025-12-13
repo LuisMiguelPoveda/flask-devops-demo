@@ -4,8 +4,17 @@
 
 {% block content %}
   <div class="card">
-    <h2>Generar resumen</h2>
-    <p>Sube un archivo y guardaremos el resumen (no se almacena el archivo).</p>
+    <h2>Generar resumen (solo TXT)</h2>
+
+    <p>
+      Para evitar errores del modelo, esta página tiene restricciones:
+    </p>
+    <ul>
+      <li><strong>Solo archivos .txt</strong></li>
+      <li><strong>Tamaño máximo: {{ max_kb }} KB</strong></li>
+      <li><strong>Se envían al modelo como máximo {{ max_chars }} caracteres</strong> (si el texto es más largo, se recorta)</li>
+      <li><strong>No se guarda el archivo</strong>, solo el resumen + asignatura + fecha</li>
+    </ul>
 
     <form method="post" enctype="multipart/form-data" id="notes-form">
       <div>
@@ -41,18 +50,12 @@
 
       <div>
         <label for="exam_date_manual">O introducir fecha manual (YYYY-MM-DD)</label>
-        <input
-            id="exam_date_manual"
-            name="exam_date_manual"
-            type="date"
-        />
-
+        <input id="exam_date_manual" name="exam_date_manual" type="date" />
       </div>
 
       <div>
-        <label for="file">Archivo</label>
-        <input id="file" name="file" type="file" required />
-        <small>Puedes subir PDF, TXT u otros (el modelo lo interpretará).</small>
+        <label for="file">Archivo TXT</label>
+        <input id="file" name="file" type="file" accept=".txt,text/plain" required />
       </div>
 
       <button type="submit" id="submit-btn">Generar y guardar</button>
@@ -106,12 +109,14 @@
 
     subjectSelect.addEventListener("change", updateSubjectUI);
 
-    examManual.addEventListener("input", () => {
-      if (examManual.value.trim()) examSelect.value = "";
-    });
-
+    // Si el usuario elige una fecha existente, limpia la manual
     examSelect.addEventListener("change", () => {
       if (examSelect.value) examManual.value = "";
+    });
+
+    // Si el usuario pone fecha manual, limpia la del desplegable
+    examManual.addEventListener("change", () => {
+      if (examManual.value) examSelect.value = "";
     });
 
     if (form && loading && submitBtn) {

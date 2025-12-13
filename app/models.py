@@ -21,7 +21,6 @@ class Subject(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-
     name = db.Column(db.String(120), nullable=False)
 
     user = db.relationship("User", back_populates="subjects")
@@ -34,7 +33,7 @@ class Subject(db.Model):
 
 class Note(db.Model):
     """
-    Guarda SOLO el resumen y metadatos (no se almacena el archivo).
+    Guardamos SOLO el resumen + metadata. El archivo NO se guarda.
     """
     __tablename__ = "notes"
 
