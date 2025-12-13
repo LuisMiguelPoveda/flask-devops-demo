@@ -164,7 +164,7 @@ def create_app():
                         "messages": [
                             {
                                 "role": "system",
-                                "content": "Actúa como un profesor paciente y claro.",
+                                "content": "Actúa como un profesor paciente y claro. Responde de forma concisa",
                             },
                             {"role": "user", "content": question},
                         ],

@@ -1,42 +1,35 @@
-/* ---------------------------
-   Base / Reset suave
----------------------------- */
+/* =========================================================
+   Reset / base
+========================================================= */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   height: 100%;
 }
 
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  line-height: 1.4;
+  line-height: 1.45;
   color: #111;
 
-  /* ✅ Fondo GIF en mosaico */
+  /* Fondo GIF en mosaico */
   background-image: url("../img/bg.gif");
   background-repeat: repeat;
   background-position: top left;
-
-  /* Si quieres que el tile sea más grande/pequeño:
-     - deja el gif como está (tamaño real), o
-     - usa background-size (ejemplos):
-     background-size: 200px 200px;
-  */
-
-  /* Para asegurar contraste con el contenido */
   background-color: #0b0b0b;
 }
 
-/* ---------------------------
-   Layout responsive
----------------------------- */
+/* =========================================================
+   Layout general
+========================================================= */
 .page {
-  min-height: calc(100vh - 56px); /* resto la barra superior */
+  min-height: calc(100vh - 56px);
   display: flex;
   align-items: stretch;
 }
@@ -48,7 +41,6 @@ body {
   padding: 16px;
 }
 
-/* Tarjeta semitransparente para que el fondo no moleste */
 .card {
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(6px);
@@ -58,9 +50,9 @@ body {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 }
 
-/* ---------------------------
+/* =========================================================
    Topbar
----------------------------- */
+========================================================= */
 .topbar {
   height: 56px;
   position: sticky;
@@ -97,9 +89,9 @@ body {
   text-decoration: underline;
 }
 
-/* ---------------------------
+/* =========================================================
    Flash messages
----------------------------- */
+========================================================= */
 .flash-stack {
   margin: 12px 0;
   display: grid;
@@ -109,7 +101,7 @@ body {
 .flash {
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -123,9 +115,9 @@ body {
   background: rgba(220, 252, 231, 0.92);
 }
 
-/* ---------------------------
+/* =========================================================
    Formularios
----------------------------- */
+========================================================= */
 form {
   display: grid;
   gap: 12px;
@@ -135,12 +127,14 @@ label {
   font-weight: 600;
 }
 
-input, select, textarea {
+input,
+select,
+textarea {
   width: 100%;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(0,0,0,0.18);
-  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.95);
   outline: none;
 }
 
@@ -163,10 +157,11 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* ---------------------------
-   Menú / chat
----------------------------- */
-.menu-list {
+/* =========================================================
+   Navegación por teclado (MENÚS)
+========================================================= */
+
+.nav-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -174,20 +169,43 @@ button:disabled {
   gap: 10px;
 }
 
-.menu-list a {
+.nav-option {
   display: block;
   padding: 12px 14px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0,0,0,0.10);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   text-decoration: none;
   color: #111;
+  outline: none;
+
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
 }
 
-.menu-list a:hover {
+/* Hover con ratón */
+.nav-option:hover {
   transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  border-color: rgba(0, 0, 0, 0.2);
 }
 
+/* 🔥 ESTA ES LA PARTE CLAVE QUE TE FALTABA 🔥
+   Resaltado cuando se navega con flechas
+   (clase añadida por nav.js)
+*/
+.nav-option.is-selected,
+.nav-option:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  border-color: rgba(59, 130, 246, 0.65);
+}
+
+/* =========================================================
+   Chat
+========================================================= */
 .chat {
   margin-top: 18px;
   display: grid;
@@ -197,8 +215,8 @@ button:disabled {
 .chat-message {
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(0,0,0,0.10);
-  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .chat-message p {
@@ -214,15 +232,42 @@ button:disabled {
   border-left: 6px solid rgba(34, 197, 94, 0.7);
 }
 
-/* ---------------------------
-   Responsive tweak
----------------------------- */
+/* =========================================================
+   Botón fijo: volver al menú principal
+========================================================= */
+.menu-home {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 50;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: #111;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.menu-home:hover {
+  transform: translateY(-1px);
+}
+
+/* =========================================================
+   Responsive
+========================================================= */
 @media (max-width: 520px) {
   .container {
     padding: 12px;
   }
+
   .card {
     padding: 14px;
     border-radius: 14px;
+  }
+
+  .menu-home {
+    left: 10px;
+    bottom: 10px;
   }
 }

@@ -5,11 +5,14 @@
 {% block content %}
   <div class="card">
     <h2>Hola, {{ username }} 👋</h2>
-    <p>Elige una opción:</p>
+    <p>Elige una opción (flechas ↑↓ + Enter):</p>
 
-    <ul class="menu-list">
-      <li><a href="{{ url_for('ask_profe') }}">Pregúntale al profe</a></li>
-      <li><a href="{{ url_for('logout') }}">Cerrar sesión</a></li>
+    <ul class="nav-list" data-nav>
+      <li>
+        <a class="nav-option" href="{{ url_for('ask_profe') }}">
+          Pregúntale al profe
+        </a>
+      </li>
     </ul>
   </div>
 {% endblock %}

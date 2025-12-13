@@ -5,7 +5,7 @@
 {% block content %}
   <div class="card">
     <h2>Pregúntale al profe</h2>
-    <p>Escribe tu duda, elige un modelo y el profe te responderá.</p>
+    <p>Escribe tu duda, elige un modelo y pulsa Enviar.</p>
 
     <form method="post" id="ask-form">
       <div>
@@ -24,10 +24,15 @@
         <textarea id="question" name="question" rows="5" required></textarea>
       </div>
 
-      <div style="display:flex; gap: 10px; align-items:center;">
-        <button type="submit" id="submit-btn">Enviar</button>
-        <a href="{{ url_for('dashboard') }}">Volver al menú</a>
-      </div>
+      <!-- Opciones navegables por flechas + enter -->
+      <ul class="nav-list" data-nav>
+        <li>
+          <button class="nav-option" type="submit" id="submit-btn">Enviar</button>
+        </li>
+        <li>
+          <a class="nav-option" href="{{ url_for('dashboard') }}">Volver al menú</a>
+        </li>
+      </ul>
     </form>
 
     <div id="loading-indicator" style="display:none; margin-top: 12px;">

@@ -12,6 +12,7 @@
     <header class="topbar">
       <div class="topbar__inner">
         <a class="brand" href="{{ url_for('dashboard') }}">Flask DevOps Demo</a>
+
         {% if current_user.is_authenticated %}
           <nav class="topbar__nav">
             <a href="{{ url_for('dashboard') }}">Menú</a>
@@ -36,5 +37,14 @@
         {% block content %}{% endblock %}
       </div>
     </main>
+
+    {% if current_user.is_authenticated %}
+      <a class="menu-home" href="{{ url_for('dashboard') }}" title="Volver al menú principal">
+        ← Volver al menú principal
+      </a>
+    {% endif %}
+
+    <!--defer + cache busting -->
+    <script defer src="{{ url_for('static', filename='js/nav.js') }}?v=1"></script>
   </body>
 </html>
