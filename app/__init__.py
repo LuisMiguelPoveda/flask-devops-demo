@@ -15,10 +15,10 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Topic, Note
+from .models import db, User, Subject, Note
 
 
-# ✅ Solo TXT
+# ✅ Solo TXT para IA (estable)
 ALLOWED_EXTENSIONS = {"txt"}
 
 # ✅ Límite duro de subida (bytes)
@@ -47,20 +47,20 @@ def fetch_models(app):
         return [app.config["LMSTUDIO_MODEL"]]
 
 
-def lmstudio_summarize_text(app, model: str, subject: str, topic: str, exam_date: str, filename: str, text: str) -> str:
+def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date: str, filename: str, text: str) -> str:
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     timeout_s = app.config["LMSTUDIO_TIMEOUT"]
 
     system_prompt = (
-        "Eres un profesor experto. Devuelve un resumen con la información clave "
+        "Eres un profesor experto. Devuelve apuntes con la información clave "
         "en español, en formato de viñetas (bullet points) y con estructura clara. "
         "No inventes información. No incluyas introducción ni despedida."
     )
 
     user_prompt = (
         f"Asignatura: {subject}\n"
-        f"Temas del examen: {topic}\n"
-        f"Fecha de evaluación: {exam_date}\n"
+        f"Título: {title}\n"
+        f"Fecha de examen: {exam_date}\n"
         f"Archivo: {filename}\n\n"
         "TEXTO A RESUMIR:\n"
         f"{text}"
@@ -89,25 +89,16 @@ def create_app():
     app = Flask(__name__)
 
     # --- Config LM Studio ---
-    app.config["LMSTUDIO_API_BASE"] = os.getenv(
-        "LMSTUDIO_API_BASE",
-        "http://127.0.0.1:1234/v1",
-    )
-    app.config["LMSTUDIO_MODEL"] = os.getenv(
-        "LMSTUDIO_MODEL",
-        "google/gemma-3-1b",
-    )
+    app.config["LMSTUDIO_API_BASE"] = os.getenv("LMSTUDIO_API_BASE", "http://127.0.0.1:1234/v1")
+    app.config["LMSTUDIO_MODEL"] = os.getenv("LMSTUDIO_MODEL", "google/gemma-3-1b")
     app.config["LMSTUDIO_TIMEOUT"] = int(os.getenv("LMSTUDIO_TIMEOUT", "300"))
 
     # --- Config app / DB ---
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-        "SQLALCHEMY_DATABASE_URI",
-        "sqlite:///app.db",
-    )
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    # ✅ límite duro por Flask/Werkzeug
+    # ✅ límite duro por Flask/Werkzeug (para subidas)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
     # --- Extensiones ---
@@ -212,27 +203,30 @@ def create_app():
         dates = [r[0].isoformat() for r in rows if r[0] is not None]
         return jsonify({"dates": dates})
 
-    # ---------- API: temas existentes por asignatura ----------
+    # ---------- API: títulos existentes por asignatura ----------
 
-    @app.route("/api/topics")
+    @app.route("/api/titles")
     @login_required
-    def api_topics():
+    def api_titles():
         subject_id = request.args.get("subject_id", type=int)
         if not subject_id:
-            return jsonify({"topics": []})
+            return jsonify({"titles": []})
 
         subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
         if not subject:
-            return jsonify({"topics": []})
+            return jsonify({"titles": []})
 
-        topics = (
-            Topic.query.filter_by(subject_id=subject_id)
-            .order_by(Topic.name.asc())
+        rows = (
+            db.session.query(Note.title)
+            .filter(Note.user_id == current_user.id, Note.subject_id == subject_id)
+            .distinct()
+            .order_by(Note.title.asc())
             .all()
         )
-        return jsonify({"topics": [{"id": t.id, "name": t.name} for t in topics]})
+        titles = [r[0] for r in rows if r[0]]
+        return jsonify({"titles": titles})
 
-    # ---------- Ask Profe ----------
+    # ---------- Ask Profe (lo dejamos tal cual si ya lo tenías) ----------
 
     @app.route("/ask-profe", methods=["GET", "POST"])
     @login_required
@@ -250,10 +244,7 @@ def create_app():
                     payload = {
                         "model": selected_model,
                         "messages": [
-                            {
-                                "role": "system",
-                                "content": "Actúa como un profesor paciente y claro. Responde de forma concisa",
-                            },
+                            {"role": "system", "content": "Actúa como un profesor paciente y claro. Responde de forma concisa"},
                             {"role": "user", "content": question},
                         ],
                         "temperature": 0.7,
@@ -291,7 +282,7 @@ def create_app():
             selected_model=selected_model,
         )
 
-    # ---------- Generar resumen (TXT) ----------
+    # ---------- Subir apuntes / Generar resumen (TXT o manual) ----------
 
     @app.route("/add-notes", methods=["GET", "POST"])
     @login_required
@@ -330,39 +321,11 @@ def create_app():
                     flash("Asignatura inválida.", "error")
                     return redirect(url_for("add_notes"))
 
-            # ---- Temas del examen ----
-            topic_choice = (request.form.get("topic_choice") or "").strip()  # id o "__new__"
-            new_topic_name = (request.form.get("new_topic_name") or "").strip()
-
-            topic_obj = None
-
-            if topic_choice == "__new__":
-                if not new_topic_name:
-                    flash("Escribe el tema del examen.", "error")
-                    return redirect(url_for("add_notes"))
-
-                topic_obj = Topic.query.filter_by(subject_id=subject.id, name=new_topic_name).first()
-                if not topic_obj:
-                    topic_obj = Topic(subject_id=subject.id, name=new_topic_name)
-                    db.session.add(topic_obj)
-                    db.session.commit()
-            else:
-                # Permitir que venga vacío (si no hay temas aún), pero tú pediste que se rellene:
-                # lo hacemos obligatorio: si no hay selección, forzamos.
-                if not topic_choice:
-                    flash("Selecciona un tema o crea uno nuevo.", "error")
-                    return redirect(url_for("add_notes"))
-
-                try:
-                    topic_id = int(topic_choice)
-                except ValueError:
-                    flash("Tema inválido.", "error")
-                    return redirect(url_for("add_notes"))
-
-                topic_obj = Topic.query.filter_by(id=topic_id, subject_id=subject.id).first()
-                if not topic_obj:
-                    flash("Tema inválido.", "error")
-                    return redirect(url_for("add_notes"))
+            # ---- Título (identificador) ----
+            title = (request.form.get("title") or "").strip()
+            if not title:
+                flash("El título es obligatorio.", "error")
+                return redirect(url_for("add_notes"))
 
             # ---- Fecha evaluación ----
             exam_str = (
@@ -378,14 +341,38 @@ def create_app():
                     flash("Formato de fecha inválido. Usa YYYY-MM-DD.", "error")
                     return redirect(url_for("add_notes"))
 
-            # ---- Archivo TXT ----
+            # ---- Modo manual (sin IA) ----
+            manual_text = (request.form.get("manual_text") or "").strip()
+            manual_mode = request.form.get("manual_mode") == "on"
+
+            if manual_mode:
+                if not manual_text:
+                    flash("Si eliges modo manual, debes escribir el contenido.", "error")
+                    return redirect(url_for("add_notes"))
+
+                note = Note(
+                    user_id=current_user.id,
+                    subject_id=subject.id,
+                    title=title,
+                    exam_date=exam_date,
+                    original_filename=None,
+                    content=manual_text,
+                    ai_used=False,
+                )
+                db.session.add(note)
+                db.session.commit()
+
+                flash("Apuntes guardados (manual) ✅", "success")
+                return redirect(url_for("dashboard"))
+
+            # ---- Si NO manual, usamos TXT + IA ----
             upload = request.files.get("file")
             if not upload or not upload.filename:
-                flash("Selecciona un archivo .txt.", "error")
+                flash("Selecciona un archivo .txt o usa modo manual.", "error")
                 return redirect(url_for("add_notes"))
 
             if not allowed_file(upload.filename):
-                flash("Solo se permiten archivos .txt.", "error")
+                flash("Solo se permiten archivos .txt (o usa modo manual).", "error")
                 return redirect(url_for("add_notes"))
 
             filename = secure_filename(upload.filename)
@@ -412,14 +399,13 @@ def create_app():
             if len(text) > MAX_TEXT_CHARS:
                 text = text[:MAX_TEXT_CHARS]
 
-            # ---- LLM resumen ----
             try:
                 exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
-                summary = lmstudio_summarize_text(
+                content = lmstudio_summarize_text(
                     app,
                     selected_model,
                     subject.name,
-                    topic_obj.name,
+                    title,
                     exam_date_str,
                     filename,
                     text,
@@ -434,17 +420,18 @@ def create_app():
                 flash("Error inesperado generando el resumen.", "error")
                 return redirect(url_for("dashboard"))
 
-            if not summary.strip():
+            if not content.strip():
                 flash("El modelo devolvió un resumen vacío.", "error")
                 return redirect(url_for("add_notes"))
 
             note = Note(
                 user_id=current_user.id,
                 subject_id=subject.id,
-                topic_id=topic_obj.id,
+                title=title,
                 exam_date=exam_date,
                 original_filename=filename,
-                summary=summary,
+                content=content,
+                ai_used=True,
             )
             db.session.add(note)
             db.session.commit()
@@ -460,6 +447,106 @@ def create_app():
             max_kb=MAX_UPLOAD_BYTES // 1024,
             max_chars=MAX_TEXT_CHARS,
         )
+
+    # ---------- Consultar apuntes (listado + filtros) ----------
+
+    @app.route("/notes")
+    @login_required
+    def notes_list():
+        subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
+
+        subject_id = request.args.get("subject_id", type=int)
+        exam_date_str = (request.args.get("exam_date") or "").strip()
+        title_q = (request.args.get("title") or "").strip()
+
+        q = Note.query.filter_by(user_id=current_user.id)
+
+        if subject_id:
+            q = q.filter(Note.subject_id == subject_id)
+
+        if exam_date_str:
+            try:
+                d = datetime.strptime(exam_date_str, "%Y-%m-%d").date()
+                q = q.filter(Note.exam_date == d)
+            except ValueError:
+                flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
+
+        if title_q:
+            q = q.filter(Note.title.ilike(f"%{title_q}%"))
+
+        notes = q.order_by(Note.updated_at.desc()).all()
+
+        return render_template(
+            "notes_list.html",
+            subjects=subjects,
+            notes=notes,
+            filters={
+                "subject_id": subject_id or "",
+                "exam_date": exam_date_str,
+                "title": title_q,
+            },
+        )
+
+    # ---------- Editar apunte ----------
+
+    @app.route("/notes/<int:note_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def note_edit(note_id: int):
+        note = Note.query.filter_by(id=note_id, user_id=current_user.id).first_or_404()
+
+        subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
+
+        if request.method == "POST":
+            # Subject (puede cambiarse)
+            subject_id = request.form.get("subject_id", type=int)
+            subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+            if not subject:
+                flash("Asignatura inválida.", "error")
+                return redirect(url_for("note_edit", note_id=note.id))
+
+            title = (request.form.get("title") or "").strip()
+            if not title:
+                flash("El título es obligatorio.", "error")
+                return redirect(url_for("note_edit", note_id=note.id))
+
+            exam_date_str = (request.form.get("exam_date") or "").strip()
+            exam_date = None
+            if exam_date_str:
+                try:
+                    exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
+                    return redirect(url_for("note_edit", note_id=note.id))
+
+            content = (request.form.get("content") or "").strip()
+            if not content:
+                flash("El contenido no puede estar vacío.", "error")
+                return redirect(url_for("note_edit", note_id=note.id))
+
+            note.subject_id = subject.id
+            note.title = title
+            note.exam_date = exam_date
+            note.content = content
+            # si lo editas a mano, ya es manual “de facto”
+            note.ai_used = False
+            note.original_filename = None
+
+            db.session.commit()
+            flash("Apunte actualizado ✅", "success")
+            return redirect(url_for("notes_list"))
+
+        return render_template("note_edit.html", note=note, subjects=subjects)
+
+    # ---------- Borrar apunte ----------
+
+    @app.route("/notes/<int:note_id>/delete", methods=["POST"])
+    @login_required
+    def note_delete(note_id: int):
+        note = Note.query.filter_by(id=note_id, user_id=current_user.id).first_or_404()
+        db.session.delete(note)
+        db.session.commit()
+        flash("Apunte borrado ✅", "success")
+        return redirect(url_for("notes_list"))
 
     return app
 

@@ -1,22 +1,22 @@
 {% extends "base.html" %}
 
-{% block title %}Generar resumen{% endblock %}
+{% block title %}Subir apuntes{% endblock %}
 
 {% block content %}
   <div class="card">
-    <h2>Generar resumen (solo TXT)</h2>
+    <h2>Subir apuntes / Generar resumen</h2>
 
-    <p>Restricciones:</p>
+    <p>Opciones:</p>
     <ul>
-      <li><strong>Solo archivos .txt</strong></li>
-      <li><strong>Tamaño máximo: {{ max_kb }} KB</strong></li>
-      <li><strong>Se envían al modelo como máximo {{ max_chars }} caracteres</strong></li>
-      <li><strong>No se guarda el archivo</strong>, solo el resumen + asignatura + tema + fecha</li>
+      <li><strong>IA (TXT):</strong> subes un .txt y se generan apuntes con el modelo.</li>
+      <li><strong>Manual:</strong> escribes el contenido y se guarda tal cual (sin IA).</li>
     </ul>
+
+    <p><strong>Restricciones IA:</strong> solo .txt, máximo {{ max_kb }} KB, y se recorta a {{ max_chars }} caracteres.</p>
 
     <form method="post" enctype="multipart/form-data" id="notes-form">
       <div>
-        <label for="model">Modelo</label>
+        <label for="model">Modelo (solo si usas IA)</label>
         <select id="model" name="model">
           {% for model in models %}
             <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
@@ -39,25 +39,14 @@
         <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Matemáticas" />
       </div>
 
-      <hr />
-
       <div>
-        <label for="topic_choice">Temas del examen</label>
-        <select id="topic_choice" name="topic_choice" required>
-          <option value="">(cargando…)</option>
-        </select>
-        <small>Elige un tema existente o crea uno nuevo.</small>
+        <label for="title">Título del apunte</label>
+        <input id="title" name="title" placeholder="Ej: Tema 3 - Derivadas" required />
+        <small>Este título se usará para identificar y filtrar.</small>
       </div>
 
-      <div id="new-topic-wrap" style="display:none;">
-        <label for="new_topic_name">Nuevo tema</label>
-        <input id="new_topic_name" name="new_topic_name" placeholder="Ej: Tema 3 - Derivadas" />
-      </div>
-
-      <hr />
-
       <div>
-        <label for="exam_date_choice">Fecha de evaluación (existente para la asignatura)</label>
+        <label for="exam_date_choice">Fecha de examen (existente para esa asignatura)</label>
         <select id="exam_date_choice" name="exam_date_choice">
           <option value="">(sin seleccionar)</option>
         </select>
@@ -68,31 +57,45 @@
         <input id="exam_date_manual" name="exam_date_manual" type="date" />
       </div>
 
+      <hr />
+
       <div>
-        <label for="file">Archivo TXT</label>
-        <input id="file" name="file" type="file" accept=".txt,text/plain" required />
+        <label>
+          <input type="checkbox" id="manual_mode" name="manual_mode" />
+          Guardar manualmente (sin IA)
+        </label>
       </div>
 
-      <button type="submit" id="submit-btn">Generar y guardar</button>
+      <div id="manual-wrap" style="display:none;">
+        <label for="manual_text">Contenido manual</label>
+        <textarea id="manual_text" name="manual_text" rows="10" placeholder="Escribe aquí tus apuntes..."></textarea>
+      </div>
+
+      <div id="file-wrap">
+        <label for="file">Archivo TXT (solo si usas IA)</label>
+        <input id="file" name="file" type="file" accept=".txt,text/plain" />
+      </div>
+
+      <button type="submit" id="submit-btn">Guardar</button>
       <a href="{{ url_for('dashboard') }}" style="margin-left: 1rem;">Volver al menú</a>
     </form>
 
     <div id="loading-indicator" style="display:none; margin-top: 12px;">
-      <em>Generando resumen... ⏳</em>
+      <em>Procesando... ⏳</em>
     </div>
   </div>
 
   <script>
     const subjectSelect = document.getElementById("subject_choice");
-    const newSubjectWrap = document.getElementById("new-subject-wrap");
-    const newSubjectInput = document.getElementById("new_subject_name");
-
-    const topicSelect = document.getElementById("topic_choice");
-    const newTopicWrap = document.getElementById("new-topic-wrap");
-    const newTopicInput = document.getElementById("new_topic_name");
+    const newWrap = document.getElementById("new-subject-wrap");
+    const newInput = document.getElementById("new_subject_name");
 
     const examSelect = document.getElementById("exam_date_choice");
     const examManual = document.getElementById("exam_date_manual");
+
+    const manualMode = document.getElementById("manual_mode");
+    const manualWrap = document.getElementById("manual-wrap");
+    const fileWrap = document.getElementById("file-wrap");
 
     const form = document.getElementById("notes-form");
     const loading = document.getElementById("loading-indicator");
@@ -104,6 +107,7 @@
 
       const resp = await fetch(`/api/exam-dates?subject_id=${encodeURIComponent(subjectId)}`);
       const data = await resp.json();
+
       (data.dates || []).forEach(d => {
         const opt = document.createElement("option");
         opt.value = d;
@@ -112,72 +116,26 @@
       });
     }
 
-    async function loadTopics(subjectId) {
-      topicSelect.innerHTML = '';
-      newTopicWrap.style.display = "none";
-      newTopicInput.value = "";
-
-      if (!subjectId) {
-        // Si estamos creando asignatura nueva, no hay temas: forzamos a crear tema
-        topicSelect.innerHTML = `
-          <option value="__new__" selected>+ Crear nuevo tema…</option>
-        `;
-        newTopicWrap.style.display = "block";
-        return;
-      }
-
-      const resp = await fetch(`/api/topics?subject_id=${encodeURIComponent(subjectId)}`);
-      const data = await resp.json();
-      const topics = data.topics || [];
-
-      if (topics.length === 0) {
-        topicSelect.innerHTML = `<option value="__new__" selected>+ Crear nuevo tema…</option>`;
-        newTopicWrap.style.display = "block";
-        return;
-      }
-
-      // temas existentes + opción de crear
-      topics.forEach(t => {
-        const opt = document.createElement("option");
-        opt.value = t.id;
-        opt.textContent = t.name;
-        topicSelect.appendChild(opt);
-      });
-
-      const optNew = document.createElement("option");
-      optNew.value = "__new__";
-      optNew.textContent = "+ Crear nuevo tema…";
-      topicSelect.appendChild(optNew);
-
-      // por defecto: primer tema
-      topicSelect.value = topics[0].id;
-    }
-
     function updateSubjectUI() {
       const val = subjectSelect.value;
       const isNew = (val === "__new__");
-
-      newSubjectWrap.style.display = isNew ? "block" : "none";
-      if (!isNew) newSubjectInput.value = "";
+      newWrap.style.display = isNew ? "block" : "none";
+      if (!isNew) newInput.value = "";
 
       if (isNew) {
         examSelect.innerHTML = '<option value="">(sin seleccionar)</option>';
-        loadTopics(null);
       } else {
         loadExamDates(val);
-        loadTopics(val);
       }
     }
 
-    function updateTopicUI() {
-      const val = topicSelect.value;
-      const isNew = (val === "__new__");
-      newTopicWrap.style.display = isNew ? "block" : "none";
-      if (!isNew) newTopicInput.value = "";
+    function updateModeUI() {
+      const isManual = manualMode.checked;
+      manualWrap.style.display = isManual ? "block" : "none";
+      fileWrap.style.display = isManual ? "none" : "block";
     }
 
     subjectSelect.addEventListener("change", updateSubjectUI);
-    topicSelect.addEventListener("change", updateTopicUI);
 
     examSelect.addEventListener("change", () => {
       if (examSelect.value) examManual.value = "";
@@ -187,6 +145,8 @@
       if (examManual.value) examSelect.value = "";
     });
 
+    manualMode.addEventListener("change", updateModeUI);
+
     if (form && loading && submitBtn) {
       form.addEventListener("submit", function () {
         loading.style.display = "block";
@@ -195,7 +155,7 @@
       });
     }
 
-    // init
     updateSubjectUI();
+    updateModeUI();
   </script>
 {% endblock %}

@@ -24,7 +24,6 @@ class Subject(db.Model):
     name = db.Column(db.String(120), nullable=False)
 
     user = db.relationship("User", back_populates="subjects")
-    topics = db.relationship("Topic", back_populates="subject", cascade="all, delete-orphan")
     notes = db.relationship("Note", back_populates="subject", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -32,28 +31,12 @@ class Subject(db.Model):
     )
 
 
-class Topic(db.Model):
-    """
-    Temas por asignatura (y por usuario, indirectamente vía subject.user_id).
-    """
-    __tablename__ = "topics"
-
-    id = db.Column(db.Integer, primary_key=True)
-    subject_id = db.Column(db.Integer, db.ForeignKey("subjects.id"), nullable=False)
-
-    name = db.Column(db.String(200), nullable=False)
-
-    subject = db.relationship("Subject", back_populates="topics")
-    notes = db.relationship("Note", back_populates="topic")
-
-    __table_args__ = (
-        db.UniqueConstraint("subject_id", "name", name="uq_topic_subject_name"),
-    )
-
-
 class Note(db.Model):
     """
-    Guardamos SOLO el resumen + metadata. El archivo NO se guarda.
+    Apuntes guardados por usuario.
+    - title: identificador humano (sustituye a 'tema')
+    - content: contenido final guardado (puede venir de IA o manual)
+    - ai_used: True si se generó con IA, False si el usuario lo escribió a mano
     """
     __tablename__ = "notes"
 
@@ -61,15 +44,17 @@ class Note(db.Model):
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     subject_id = db.Column(db.Integer, db.ForeignKey("subjects.id"), nullable=False)
-    topic_id = db.Column(db.Integer, db.ForeignKey("topics.id"), nullable=True)
 
+    title = db.Column(db.String(200), nullable=False)
     exam_date = db.Column(db.Date, nullable=True)
 
     original_filename = db.Column(db.String(255), nullable=True)
-    summary = db.Column(db.Text, nullable=False)
+
+    content = db.Column(db.Text, nullable=False)
+    ai_used = db.Column(db.Boolean, default=False, nullable=False)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     user = db.relationship("User", back_populates="notes")
     subject = db.relationship("Subject", back_populates="notes")
-    topic = db.relationship("Topic", back_populates="notes")

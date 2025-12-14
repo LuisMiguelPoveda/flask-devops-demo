@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Editar apunte{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2>Editar apunte</h2>
+
+    <form method="post">
+      <div>
+        <label for="subject_id">Asignatura</label>
+        <select id="subject_id" name="subject_id" required>
+          {% for s in subjects %}
+            <option value="{{ s.id }}" {% if s.id == note.subject_id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="title">Título</label>
+        <input id="title" name="title" value="{{ note.title }}" required />
+      </div>
+
+      <div>
+        <label for="exam_date">Fecha examen</label>
+        <input id="exam_date" name="exam_date" type="date" value="{{ note.exam_date if note.exam_date else '' }}" />
+      </div>
+
+      <div>
+        <label for="content">Contenido</label>
+        <textarea id="content" name="content" rows="14" required>{{ note.content }}</textarea>
+        <small>Al editar, se guarda como manual (sin IA).</small>
+      </div>
+
+      <button type="submit">Guardar cambios</button>
+      <a href="{{ url_for('notes_list') }}" style="margin-left: 1rem;">Volver</a>
+    </form>
+  </div>
+{% endblock %}

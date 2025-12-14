@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Consultar apuntes{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2>Consultar apuntes</h2>
+
+    <form method="get" style="margin-bottom: 1rem;">
+      <div>
+        <label for="subject_id">Asignatura</label>
+        <select id="subject_id" name="subject_id">
+          <option value="">(todas)</option>
+          {% for s in subjects %}
+            <option value="{{ s.id }}" {% if filters.subject_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="exam_date">Fecha examen (YYYY-MM-DD)</label>
+        <input id="exam_date" name="exam_date" type="date" value="{{ filters.exam_date }}" />
+      </div>
+
+      <div>
+        <label for="title">Título contiene</label>
+        <input id="title" name="title" type="text" value="{{ filters.title }}" placeholder="Ej: Derivadas" />
+      </div>
+
+      <button type="submit">Filtrar</button>
+      <a href="{{ url_for('notes_list') }}" style="margin-left: 1rem;">Limpiar</a>
+      <a href="{{ url_for('dashboard') }}" style="margin-left: 1rem;">Volver al menú</a>
+    </form>
+
+    {% if notes|length == 0 %}
+      <p>No hay apuntes con esos filtros.</p>
+    {% else %}
+      {% for n in notes %}
+        <div class="card" style="margin-top: 1rem;">
+          <h3>{{ n.title }}</h3>
+          <p>
+            <strong>Asignatura:</strong> {{ n.subject.name }} |
+            <strong>Fecha:</strong> {{ n.exam_date if n.exam_date else "—" }} |
+            <strong>Modo:</strong> {{ "IA" if n.ai_used else "Manual" }}
+          </p>
+
+          <details>
+            <summary>Ver contenido</summary>
+            <pre style="white-space: pre-wrap;">{{ n.content }}</pre>
+          </details>
+
+          <div style="margin-top: .75rem;">
+            <a href="{{ url_for('note_edit', note_id=n.id) }}">Editar</a>
+
+            <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" style="display:inline;">
+              <button type="submit" onclick="return confirm('¿Seguro que quieres borrar este apunte?');">
+                Borrar
+              </button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+{% endblock %}
