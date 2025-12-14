@@ -15,16 +15,16 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Note
+from .models import db, User, Subject, Topic, Note
 
 
 # ✅ Solo TXT
 ALLOWED_EXTENSIONS = {"txt"}
 
-# ✅ Límite duro de subida (bytes) — evita que llegue algo enorme
+# ✅ Límite duro de subida (bytes)
 MAX_UPLOAD_BYTES = 250 * 1024  # 250 KB
 
-# ✅ Límite “texto” que mandamos al modelo (caracteres)
+# ✅ Límite de texto que mandamos al modelo (caracteres)
 MAX_TEXT_CHARS = 30_000
 
 
@@ -33,10 +33,6 @@ def allowed_file(filename: str) -> bool:
 
 
 def fetch_models(app):
-    """
-    Lista modelos disponibles en LM Studio (/v1/models).
-    Si falla, devuelve el modelo por defecto.
-    """
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     try:
         resp = requests.get(f"{api_base}/models", timeout=5)
@@ -51,10 +47,7 @@ def fetch_models(app):
         return [app.config["LMSTUDIO_MODEL"]]
 
 
-def lmstudio_summarize_text(app, model: str, subject: str, exam_date: str, filename: str, text: str) -> str:
-    """
-    Envía SOLO TEXTO al modelo (estable y compatible con /chat/completions).
-    """
+def lmstudio_summarize_text(app, model: str, subject: str, topic: str, exam_date: str, filename: str, text: str) -> str:
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     timeout_s = app.config["LMSTUDIO_TIMEOUT"]
 
@@ -66,6 +59,7 @@ def lmstudio_summarize_text(app, model: str, subject: str, exam_date: str, filen
 
     user_prompt = (
         f"Asignatura: {subject}\n"
+        f"Temas del examen: {topic}\n"
         f"Fecha de evaluación: {exam_date}\n"
         f"Archivo: {filename}\n\n"
         "TEXTO A RESUMIR:\n"
@@ -130,7 +124,7 @@ def create_app():
     with app.app_context():
         db.create_all()
 
-    # ---------- Rutas auth ----------
+    # ---------- Auth ----------
 
     @app.route("/", methods=["GET", "POST"])
     def login():
@@ -148,7 +142,6 @@ def create_app():
                 return redirect(url_for("dashboard"))
 
             flash("Usuario o contraseña incorrectos.", "error")
-
         return render_template("login.html")
 
     @app.route("/register", methods=["GET", "POST"])
@@ -191,6 +184,53 @@ def create_app():
     @login_required
     def dashboard():
         return render_template("dashboard.html", username=current_user.username)
+
+    # ---------- API: fechas existentes por asignatura ----------
+
+    @app.route("/api/exam-dates")
+    @login_required
+    def api_exam_dates():
+        subject_id = request.args.get("subject_id", type=int)
+        if not subject_id:
+            return jsonify({"dates": []})
+
+        subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+        if not subject:
+            return jsonify({"dates": []})
+
+        rows = (
+            db.session.query(Note.exam_date)
+            .filter(
+                Note.user_id == current_user.id,
+                Note.subject_id == subject_id,
+                Note.exam_date.isnot(None),
+            )
+            .distinct()
+            .order_by(Note.exam_date.asc())
+            .all()
+        )
+        dates = [r[0].isoformat() for r in rows if r[0] is not None]
+        return jsonify({"dates": dates})
+
+    # ---------- API: temas existentes por asignatura ----------
+
+    @app.route("/api/topics")
+    @login_required
+    def api_topics():
+        subject_id = request.args.get("subject_id", type=int)
+        if not subject_id:
+            return jsonify({"topics": []})
+
+        subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+        if not subject:
+            return jsonify({"topics": []})
+
+        topics = (
+            Topic.query.filter_by(subject_id=subject_id)
+            .order_by(Topic.name.asc())
+            .all()
+        )
+        return jsonify({"topics": [{"id": t.id, "name": t.name} for t in topics]})
 
     # ---------- Ask Profe ----------
 
@@ -251,33 +291,6 @@ def create_app():
             selected_model=selected_model,
         )
 
-    # ---------- API: fechas existentes por asignatura ----------
-
-    @app.route("/api/exam-dates")
-    @login_required
-    def api_exam_dates():
-        subject_id = request.args.get("subject_id", type=int)
-        if not subject_id:
-            return jsonify({"dates": []})
-
-        subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
-        if not subject:
-            return jsonify({"dates": []})
-
-        rows = (
-            db.session.query(Note.exam_date)
-            .filter(
-                Note.user_id == current_user.id,
-                Note.subject_id == subject_id,
-                Note.exam_date.isnot(None),
-            )
-            .distinct()
-            .order_by(Note.exam_date.asc())
-            .all()
-        )
-        dates = [r[0].isoformat() for r in rows if r[0] is not None]
-        return jsonify({"dates": dates})
-
     # ---------- Generar resumen (TXT) ----------
 
     @app.route("/add-notes", methods=["GET", "POST"])
@@ -291,7 +304,7 @@ def create_app():
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
 
-            # ---- Asignatura: elegir o crear ----
+            # ---- Asignatura ----
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
 
@@ -317,7 +330,41 @@ def create_app():
                     flash("Asignatura inválida.", "error")
                     return redirect(url_for("add_notes"))
 
-            # ---- Fecha evaluación: existente o manual ----
+            # ---- Temas del examen ----
+            topic_choice = (request.form.get("topic_choice") or "").strip()  # id o "__new__"
+            new_topic_name = (request.form.get("new_topic_name") or "").strip()
+
+            topic_obj = None
+
+            if topic_choice == "__new__":
+                if not new_topic_name:
+                    flash("Escribe el tema del examen.", "error")
+                    return redirect(url_for("add_notes"))
+
+                topic_obj = Topic.query.filter_by(subject_id=subject.id, name=new_topic_name).first()
+                if not topic_obj:
+                    topic_obj = Topic(subject_id=subject.id, name=new_topic_name)
+                    db.session.add(topic_obj)
+                    db.session.commit()
+            else:
+                # Permitir que venga vacío (si no hay temas aún), pero tú pediste que se rellene:
+                # lo hacemos obligatorio: si no hay selección, forzamos.
+                if not topic_choice:
+                    flash("Selecciona un tema o crea uno nuevo.", "error")
+                    return redirect(url_for("add_notes"))
+
+                try:
+                    topic_id = int(topic_choice)
+                except ValueError:
+                    flash("Tema inválido.", "error")
+                    return redirect(url_for("add_notes"))
+
+                topic_obj = Topic.query.filter_by(id=topic_id, subject_id=subject.id).first()
+                if not topic_obj:
+                    flash("Tema inválido.", "error")
+                    return redirect(url_for("add_notes"))
+
+            # ---- Fecha evaluación ----
             exam_str = (
                 (request.form.get("exam_date_manual") or "").strip()
                 or (request.form.get("exam_date_choice") or "").strip()
@@ -352,7 +399,6 @@ def create_app():
                 flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
                 return redirect(url_for("add_notes"))
 
-            # Convertir a texto (robusto)
             try:
                 text = file_bytes.decode("utf-8")
             except UnicodeDecodeError:
@@ -363,7 +409,6 @@ def create_app():
                 flash("El TXT no contiene texto legible.", "error")
                 return redirect(url_for("add_notes"))
 
-            # Capar texto enviado al modelo (evita errores por tamaño)
             if len(text) > MAX_TEXT_CHARS:
                 text = text[:MAX_TEXT_CHARS]
 
@@ -374,6 +419,7 @@ def create_app():
                     app,
                     selected_model,
                     subject.name,
+                    topic_obj.name,
                     exam_date_str,
                     filename,
                     text,
@@ -395,6 +441,7 @@ def create_app():
             note = Note(
                 user_id=current_user.id,
                 subject_id=subject.id,
+                topic_id=topic_obj.id,
                 exam_date=exam_date,
                 original_filename=filename,
                 summary=summary,
