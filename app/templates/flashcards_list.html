@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Flashcards{% endblock %}
+
+{% block content %}
+  <section class="shell">
+    <header class="topbar">
+      <div>
+        <h1 class="headline">Flashcards</h1>
+        <p class="subtle">Filtra, edita o borra tus decks.</p>
+      </div>
+      <a class="link-pill" href="{{ url_for('dashboard') }}">Volver al menú</a>
+    </header>
+
+    <div class="card" style="margin-bottom:14px;">
+      <form method="get" class="filters">
+        <div>
+          <label for="subject_id">Asignatura</label>
+          <select id="subject_id" name="subject_id">
+            <option value="">(todas)</option>
+            {% for s in subjects %}
+              <option value="{{ s.id }}" {% if filters.subject_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="exam_date">Fecha examen</label>
+          <input id="exam_date" name="exam_date" type="date" value="{{ filters.exam_date }}" />
+        </div>
+
+        <div>
+          <label for="title">Título contiene</label>
+          <input id="title" name="title" value="{{ filters.title }}" placeholder="Ej: fotosíntesis" />
+        </div>
+
+        <ul class="nav-list" data-nav>
+          <li><button class="nav-option btn-primary" type="submit">Filtrar</button></li>
+          <li><a class="nav-option" href="{{ url_for('flashcards_list') }}">Limpiar</a></li>
+          <li><a class="nav-option" href="{{ url_for('flashcards_create') }}">Crear flashcards</a></li>
+        </ul>
+      </form>
+    </div>
+
+    {% if decks|length == 0 %}
+      <div class="card"><p>No hay decks con esos filtros.</p></div>
+    {% else %}
+      {% for d in decks %}
+        <div class="card" style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+            <div>
+              <h3 style="margin:0;">{{ d.title }}</h3>
+              <p style="margin:4px 0 0 0;">
+                <strong>Asignatura:</strong> {{ d.subject.name }} |
+                <strong>Fecha:</strong> {{ d.exam_date if d.exam_date else "—" }} |
+                <strong>Flashcards:</strong> {{ d.flashcards|length }}
+              </p>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <a class="link-pill" href="{{ url_for('flashcards_edit', deck_id=d.id) }}">Editar</a>
+              <form method="post" action="{{ url_for('flashcards_delete', deck_id=d.id) }}">
+                <button type="submit" onclick="return confirm('¿Borrar este deck?');">Borrar</button>
+              </form>
+            </div>
+          </div>
+
+          <details style="margin-top:10px;">
+            <summary>Ver flashcards</summary>
+            <div style="display:grid;gap:10px;margin-top:10px;">
+              {% for card in d.flashcards %}
+                <div class="card" style="padding:10px;background:rgba(0,0,0,0.06);">
+                  <strong>Q{{ loop.index }}.</strong> {{ card.question }}
+                  <ol style="margin:8px 0 0 16px;padding:0;">
+                    {% for opt in card.options %}
+                      <li {% if loop.index0 == card.correct_index %}style="font-weight:700;color:#16a34a;"{% endif %}>
+                        {{ opt }}
+                      </li>
+                    {% endfor %}
+                  </ol>
+                </div>
+              {% endfor %}
+            </div>
+          </details>
+        </div>
+      {% endfor %}
+    {% endif %}
+  </section>
+{% endblock %}

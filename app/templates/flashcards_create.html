@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Crear flashcards{% endblock %}
+
+{% block content %}
+  <section class="shell">
+    <header class="topbar">
+      <div>
+        <h1 class="headline">Crear / Generar flashcards</h1>
+        <p class="subtle">Elige generar con IA desde un apunte o crea una manual.</p>
+      </div>
+      <a class="link-pill" href="{{ url_for('dashboard') }}">Volver al menú</a>
+    </header>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3>Generar 5 con IA</h3>
+      <p>Selecciona un apunte/resumen y un modelo. Se guardarán automáticamente.</p>
+
+      <form method="post" class="stack">
+        <input type="hidden" name="mode" value="ai" />
+
+        <label>Modelo
+          <select name="model">
+            {% for m in models %}
+              <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label>Apunte / resumen
+          <select name="note_id" required>
+            <option value="">(elige uno)</option>
+            {% for n in notes %}
+              <option value="{{ n.id }}">
+                {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <ul class="nav-list" data-nav>
+          <li><button class="nav-option btn-primary" type="submit">Generar con IA</button></li>
+          <li><a class="nav-option" href="{{ url_for('dashboard') }}">Volver al menú</a></li>
+        </ul>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Crear manual</h3>
+      <p>Una flashcard con 4 opciones y la correcta marcada.</p>
+
+      <form method="post" id="manual-form">
+        <input type="hidden" name="mode" value="manual" />
+
+        <div>
+          <label for="subject_choice">Asignatura</label>
+          <select id="subject_choice" name="subject_choice" required>
+            {% for s in subjects %}
+              <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+            <option value="__new__">+ Añadir nueva asignatura…</option>
+          </select>
+        </div>
+
+        <div id="new-subject-wrap" style="display:none;">
+          <label for="new_subject_name">Nueva asignatura</label>
+          <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Anatomía" />
+        </div>
+
+        <div>
+          <label for="title">Título del deck</label>
+          <input id="title" name="title" placeholder="Ej: Sistema nervioso" required />
+        </div>
+
+        <div>
+          <label for="exam_date">Fecha de examen</label>
+          <input id="exam_date" name="exam_date" type="date" />
+        </div>
+
+        <hr />
+
+        <div>
+          <label for="q">Pregunta</label>
+          <textarea id="q" name="q" rows="3" required></textarea>
+        </div>
+
+        <div>
+          <label>Respuestas (marca la correcta)</label>
+          {% for idx, letter in [(0,"A"), (1,"B"), (2,"C"), (3,"D")] %}
+            <div class="answer-row">
+              <input class="answer-radio" type="radio" name="correct" value="{{ idx }}" {% if idx == 0 %}checked{% endif %} required />
+              <input class="input answer-input" name="{{ ['a','b','c','d'][idx] }}" placeholder="Opción {{ letter }}" required />
+            </div>
+          {% endfor %}
+        </div>
+
+        <ul class="nav-list" data-nav>
+          <li><button class="nav-option btn-primary" type="submit">Guardar flashcard</button></li>
+          <li><a class="nav-option" href="{{ url_for('dashboard') }}">Cancelar</a></li>
+        </ul>
+      </form>
+    </div>
+  </section>
+
+  <script>
+    const subjectSelect = document.getElementById("subject_choice");
+    const newWrap = document.getElementById("new-subject-wrap");
+    const newInput = document.getElementById("new_subject_name");
+
+    function toggleSubject() {
+      const isNew = subjectSelect.value === "__new__";
+      newWrap.style.display = isNew ? "block" : "none";
+      if (!isNew) newInput.value = "";
+    }
+
+    subjectSelect.addEventListener("change", toggleSubject);
+    toggleSubject();
+  </script>
+{% endblock %}

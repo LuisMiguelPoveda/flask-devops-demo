@@ -1,17 +1,55 @@
 {% extends "base.html" %}
-
 {% block title %}Menú principal{% endblock %}
 
 {% block content %}
-  <div class="card">
-    <h2>Hola, {{ username }} 👋</h2>
-    <p>Elige una opción:</p>
+  <section class="shell shell--dashboard">
+    <header class="dash-hero">
+      <div>
+        <p class="eyebrow">Panel</p>
+        <h1 class="headline">Hola, {{ username }} 👋</h1>
+        <p class="subtle">Flechas para moverte, Enter para entrar.</p>
+      </div>
+      <a class="link-pill" href="{{ url_for('logout') }}">Cerrar sesión</a>
+    </header>
 
-    <ul class="menu-list">
-      <li><a href="{{ url_for('ask_profe') }}">Pregúntale al profe</a></li>
-      <li><a href="{{ url_for('add_notes') }}">Subir apuntes / Generar resumen</a></li>
-      <li><a href="{{ url_for('notes_list') }}">Consultar apuntes</a></li>
-      <li><a href="{{ url_for('logout') }}">Cerrar sesión</a></li>
-    </ul>
-  </div>
+    <div class="menu-wrap">
+      <div class="menu-grid" data-nav>
+        <a class="menu-btn nav-option" href="{{ url_for('ask_profe') }}">
+          <div class="menu-icon">💬</div>
+          <div class="menu-title">Pregúntale al profe</div>
+          <div class="menu-desc">Chat con LM Studio.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('add_notes') }}">
+          <div class="menu-icon">📝</div>
+          <div class="menu-title">Subir apuntes / Generar resumen</div>
+          <div class="menu-desc">Guardar manual o generar desde TXT.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('notes_list') }}">
+          <div class="menu-icon">📚</div>
+          <div class="menu-title">Consultar apuntes</div>
+          <div class="menu-desc">Filtrar, editar o borrar.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('flashcards_create') }}">
+          <div class="menu-icon">🧠</div>
+          <div class="menu-title">Crear / Generar flashcards</div>
+          <div class="menu-desc">Genera 5 con IA o crea manualmente.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('flashcards_list') }}">
+          <div class="menu-icon">🗂️</div>
+          <div class="menu-title">Visualizar / Editar flashcards</div>
+          <div class="menu-desc">Filtra, edita y borra decks.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('logout') }}">
+          <div class="menu-icon">🚪</div>
+          <div class="menu-title">Salir</div>
+          <div class="menu-desc">Cerrar sesión.</div>
+        </a>
+      </div>
+    </div>
+  </section>
 {% endblock %}

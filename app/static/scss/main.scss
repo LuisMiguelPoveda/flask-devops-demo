@@ -50,6 +50,111 @@ body {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 }
 
+.shell {
+  position: relative;
+  padding: 16px 0 32px 0;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(59, 130, 246, 0.08));
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+    z-index: -1;
+  }
+}
+
+.shell--dashboard {
+  padding: 22px 18px;
+}
+
+.dash-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+
+  .headline {
+    margin: 4px 0;
+  }
+
+  .subtle {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+  }
+}
+
+.menu-wrap {
+  padding: 8px;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.menu-btn {
+  display: block;
+  padding: 16px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: #0c0c0c;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+
+  &:hover,
+  &.is-selected {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 30px rgba(0, 0, 0, 0.28);
+    border-color: #d97706;
+    background: linear-gradient(135deg, #fcd34d, #f59e0b);
+    color: #1f2937;
+  }
+
+  &:focus-visible {
+    outline: none;
+    transform: translateY(-2px);
+    border-color: #b45309;
+    box-shadow: 0 18px 32px rgba(217, 119, 6, 0.45);
+    background: linear-gradient(135deg, #fde68a, #f59e0b);
+  }
+}
+
+.menu-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.menu-title {
+  font-weight: 800;
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+
+.menu-desc {
+  margin: 0;
+  color: rgba(17, 17, 17, 0.72);
+}
+
 /* =========================================================
    Topbar
 ========================================================= */
@@ -155,6 +260,31 @@ button {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #0f172a;
+  color: #fff;
+  border: 1px solid rgba(59, 130, 246, 0.8);
+
+  &:hover {
+    background: #0b1220;
+  }
+}
+
+.answer-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.answer-input {
+  flex: 1;
+}
+
+.answer-radio {
+  transform: scale(1.1);
 }
 
 /* =========================================================
@@ -269,5 +399,10 @@ button:disabled {
   .menu-home {
     left: 10px;
     bottom: 10px;
+  }
+
+  .dash-hero {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

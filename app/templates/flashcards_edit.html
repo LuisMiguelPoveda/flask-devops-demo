@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Editar flashcards{% endblock %}
+
+{% block content %}
+<section class="shell">
+  <header class="topbar">
+    <div>
+      <h1 class="headline">Editar deck</h1>
+      <p class="subtle">Edita metadatos y todas las flashcards.</p>
+    </div>
+    <a class="link-pill" href="{{ url_for('flashcards_list') }}">Volver</a>
+  </header>
+
+  <div class="card" style="padding:16px;">
+    <form method="post" id="edit-form">
+      <div>
+        <label class="label">Asignatura</label>
+        <select class="input" name="subject_id" required>
+          {% for s in subjects %}
+            <option value="{{ s.id }}" {% if s.id == deck.subject_id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="margin-top:10px;">
+        <label class="label">Título</label>
+        <input class="input" name="title" value="{{ deck.title }}" required />
+      </div>
+
+      <div style="margin-top:10px;">
+        <label class="label">Fecha de examen</label>
+        <input class="input" type="date" name="exam_date" value="{{ deck.exam_date if deck.exam_date else '' }}" />
+      </div>
+
+      <hr />
+
+      <div id="cards">
+        {% for c in deck.flashcards %}
+          {% set card_idx = loop.index0 %}
+          <div class="card" style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+            <label class="label">Pregunta</label>
+            <textarea class="input" name="card_q_{{ loop.index0 }}" rows="3" required>{{ c.question }}</textarea>
+
+            <div style="margin-top:10px;">
+              <label class="label">Opciones (marca correcta)</label>
+
+              {% for opt in c.options %}
+            <div class="answer-row">
+              <input class="answer-radio" type="radio" name="card_correct_{{ card_idx }}" value="{{ loop.index0 }}"
+                {% if loop.index0 == c.correct_index %}checked{% endif %} required />
+              <input class="input answer-input" name="card_o{{ loop.index0 }}_{{ card_idx }}" value="{{ opt }}" required />
+            </div>
+          {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <button class="btn-primary" type="button" id="add-card" style="margin-top:12px;">+ Añadir flashcard</button>
+
+      <div style="margin-top:12px;">
+        <button class="btn-primary" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+  const cardsDiv = document.getElementById("cards");
+  const addBtn = document.getElementById("add-card");
+
+  function newCardHtml(i) {
+    return `
+      <div class="card" style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+        <label class="label">Pregunta</label>
+        <textarea class="input" name="card_q_${i}" rows="3" required></textarea>
+
+        <div style="margin-top:10px;">
+          <label class="label">Opciones (marca correcta)</label>
+
+          ${[0,1,2,3].map(j => `
+            <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+              <input type="radio" name="card_correct_${i}" value="${j}" ${j===0?'checked':''} required />
+              <input class="input" style="flex:1;" name="card_o${j}_${i}" required />
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  addBtn.addEventListener("click", () => {
+    const current = cardsDiv.querySelectorAll("textarea[name^='card_q_']").length;
+    cardsDiv.insertAdjacentHTML("beforeend", newCardHtml(current));
+  });
+</script>
+{% endblock %}
