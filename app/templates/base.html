@@ -1,24 +1,50 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="utf-8" />
-    <title>{% block title %}ADNME{% endblock %}</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/main.css') }}"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}App{% endblock %}</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   </head>
+
   <body>
-    <header>
-      <h1>ADNME</h1>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <a class="brand" href="{{ url_for('dashboard') }}">Flask DevOps Demo</a>
+
+        {% if current_user.is_authenticated %}
+          <nav class="topbar__nav">
+            <a href="{{ url_for('dashboard') }}">Menú</a>
+            <a href="{{ url_for('logout') }}">Salir</a>
+          </nav>
+        {% endif %}
+      </div>
     </header>
 
-    <main>
-      {% block content %}{% endblock %}
+    <main class="page">
+      <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flash-stack">
+              {% for category, message in messages %}
+                <div class="flash flash--{{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+      </div>
     </main>
 
-    <footer>
-      <small>CI/CD Flask + Docker study aid for ADD students</small>
-    </footer>
+    {% if current_user.is_authenticated %}
+      <a class="menu-home" href="{{ url_for('dashboard') }}" title="Volver al menú principal">
+        ← Volver al menú principal
+      </a>
+    {% endif %}
+
+    <!--defer + cache busting -->
+    <script defer src="{{ url_for('static', filename='js/nav.js') }}?v=1"></script>
   </body>
 </html>

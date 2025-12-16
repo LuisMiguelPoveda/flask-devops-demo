@@ -1,24 +1,273 @@
-$bg-color: #0f172a;
-$text-color: #e5e7eb;
-$accent-color: #38bdf8;
+/* =========================================================
+   Reset / base
+========================================================= */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
 
 body {
   margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  line-height: 1.45;
+  color: #111;
+
+  /* Fondo GIF en mosaico */
+  background-image: url("../img/bg.gif");
+  background-repeat: repeat;
+  background-position: top left;
+  background-color: #0b0b0b;
+}
+
+/* =========================================================
+   Layout general
+========================================================= */
+.page {
+  min-height: calc(100vh - 56px);
+  display: flex;
+  align-items: stretch;
+}
+
+.container {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+/* =========================================================
+   Topbar
+========================================================= */
+.topbar {
+  height: 56px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(10, 10, 10, 0.65);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.topbar__inner {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.brand {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.topbar__nav a {
+  color: rgba(255, 255, 255, 0.9);
+  text-decoration: none;
+  margin-left: 12px;
+}
+
+.topbar__nav a:hover {
+  text-decoration: underline;
+}
+
+/* =========================================================
+   Flash messages
+========================================================= */
+.flash-stack {
+  margin: 12px 0;
+  display: grid;
+  gap: 10px;
+}
+
+.flash {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.flash--error {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.flash--success {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(220, 252, 231, 0.92);
+}
+
+/* =========================================================
+   Formularios
+========================================================= */
+form {
+  display: grid;
+  gap: 12px;
+}
+
+label {
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  outline: none;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  background: #111;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* =========================================================
+   Navegación por teclado (MENÚS)
+========================================================= */
+
+.nav-list {
+  list-style: none;
   padding: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background-color: $bg-color;
-  color: $text-color;
+  margin: 0;
+  display: grid;
+  gap: 10px;
 }
 
-header,
-footer {
-  padding: 1rem 2rem;
-  background: lighten($bg-color, 5%);
+.nav-option {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  text-decoration: none;
+  color: #111;
+  outline: none;
+
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
 }
 
-.hero {
-  padding: 2rem;
-  h2 {
-    color: $accent-color;
+/* Hover con ratón */
+.nav-option:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+/* 🔥 ESTA ES LA PARTE CLAVE QUE TE FALTABA 🔥
+   Resaltado cuando se navega con flechas
+   (clase añadida por nav.js)
+*/
+.nav-option.is-selected,
+.nav-option:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  border-color: rgba(59, 130, 246, 0.65);
+}
+
+/* =========================================================
+   Chat
+========================================================= */
+.chat {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.chat-message {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.chat-message p {
+  margin: 6px 0 0 0;
+  white-space: pre-wrap;
+}
+
+.chat-message.user {
+  border-left: 6px solid rgba(59, 130, 246, 0.7);
+}
+
+.chat-message.assistant {
+  border-left: 6px solid rgba(34, 197, 94, 0.7);
+}
+
+/* =========================================================
+   Botón fijo: volver al menú principal
+========================================================= */
+.menu-home {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 50;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-decoration: none;
+  color: #111;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.menu-home:hover {
+  transform: translateY(-1px);
+}
+
+/* =========================================================
+   Responsive
+========================================================= */
+@media (max-width: 520px) {
+  .container {
+    padding: 12px;
+  }
+
+  .card {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .menu-home {
+    left: 10px;
+    bottom: 10px;
   }
 }

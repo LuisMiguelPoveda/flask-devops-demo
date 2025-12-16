@@ -3,16 +3,15 @@
 {% block title %}Menú principal{% endblock %}
 
 {% block content %}
-  <section class="menu">
+  <div class="card">
     <h2>Hola, {{ username }} 👋</h2>
     <p>Elige una opción:</p>
 
     <ul class="menu-list">
-      <li>
-        <a href="{{ url_for('ask_profe') }}">Pregúntale al profe</a>
-      </li>
-      <!-- Más opciones en el futuro -->
-      <!-- <li><a href="#">Otra funcionalidad</a></li> -->
+      <li><a href="{{ url_for('ask_profe') }}">Pregúntale al profe</a></li>
+      <li><a href="{{ url_for('add_notes') }}">Subir apuntes / Generar resumen</a></li>
+      <li><a href="{{ url_for('notes_list') }}">Consultar apuntes</a></li>
+      <li><a href="{{ url_for('logout') }}">Cerrar sesión</a></li>
     </ul>
-  </section>
+  </div>
 {% endblock %}
