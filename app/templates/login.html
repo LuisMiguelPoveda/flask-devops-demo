@@ -1,37 +1,50 @@
 {% extends "base.html" %}
 
-{% block title %}Login{% endblock %}
+{% block title %}Inicia sesión{% endblock %}
 
 {% block content %}
-  <section class="login">
-    <h2>Login</h2>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <ul class="flash-messages">
-          {% for category, message in messages %}
-            <li class="{{ category }}">{{ message }}</li>
-          {% endfor %}
-        </ul>
-      {% endif %}
-    {% endwith %}
-
-    <form method="post">
+  <section class="shell shell--auth">
+    <header class="section-header section-header--auth">
       <div>
-        <label for="username">Username</label>
-        <input id="username" name="username" required />
+        <p class="eyebrow">Acceso</p>
+        <h1 class="headline">Bienvenido de vuelta</h1>
+        <p class="subtle">Inicia sesión para crear resúmenes, generar flashcards y editarlas.</p>
+      </div>
+    </header>
+
+    <div class="card auth-card">
+      <div class="auth-card__head">
+        <h2>Datos de acceso</h2>
+        <p class="subtle">Tu cuenta está protegida. No compartas tu contraseña.</p>
       </div>
 
-      <div>
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" required />
-      </div>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <ul class="auth-flash">
+            {% for category, message in messages %}
+              <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
 
-      <button type="submit">Log in</button>
-    </form>
-    <p>
-      Don't have an account? <a href="{{ url_for('register') }}">Sign up</a>
-    </p>
+      <form method="post" class="auth-form">
+        <div>
+          <label for="username">Usuario</label>
+          <input id="username" name="username" autocomplete="username" required />
+        </div>
 
+        <div>
+          <label for="password">Contraseña</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+        </div>
+
+        <button class="btn-primary auth-submit" type="submit">Entrar</button>
+      </form>
+
+      <p class="auth-switch">
+        ¿No tienes cuenta? <a href="{{ url_for('register') }}">Crear una cuenta</a>
+      </p>
+    </div>
   </section>
 {% endblock %}

@@ -11,114 +11,125 @@
     </header>
 
     <div class="card" style="margin-bottom:16px;">
-      <h3>Generar 5 con IA</h3>
-      <p>Selecciona un apunte/resumen y un modelo. Se guardarán automáticamente.</p>
+      <div class="mode-toggle" role="tablist" aria-label="Modo de creación">
+        <button type="button" class="mode-toggle__btn is-active" data-mode-btn="ai" role="tab" aria-selected="true">
+          Generar con IA
+        </button>
+        <button type="button" class="mode-toggle__btn" data-mode-btn="manual" role="tab" aria-selected="false">
+          Crear manual
+        </button>
+      </div>
 
-      <form method="post" class="stack" id="ai-create-form">
-        <input type="hidden" name="mode" value="ai" />
+      <div class="mode-panel is-active" data-mode-panel="ai">
+        <h3>Generar 5 con IA</h3>
+        <p>Selecciona un apunte/resumen y un modelo. Se guardarán automáticamente.</p>
 
-        <label>Deck destino (opcional)
-          <select name="deck_id">
-            <option value="">Crear nuevo deck</option>
-            {% for d in decks %}
-              <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
-            {% endfor %}
-          </select>
-        </label>
+        <form method="post" class="stack" id="ai-create-form">
+          <input type="hidden" name="mode" value="ai" />
 
-        <label>Modelo
-          <select name="model">
-            {% for m in models %}
-              <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
-            {% endfor %}
-          </select>
-        </label>
-
-        <label>Apunte / resumen
-          <select name="note_id" required>
-            <option value="">(elige uno)</option>
-            {% for n in notes %}
-              <option value="{{ n.id }}">
-                {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %}
-              </option>
-            {% endfor %}
-          </select>
-        </label>
-
-        <ul class="nav-list" data-nav>
-          <li><button class="nav-option btn-primary" type="submit" id="ai-create-btn">Generar con IA</button></li>
-          <li><a class="nav-option" href="{{ url_for('dashboard') }}">Volver al menú</a></li>
-        </ul>
-      </form>
-      <div class="loading-banner" id="ai-create-loading">Generando flashcards... ⏳</div>
-    </div>
-
-    <div class="card">
-      <h3>Crear manual</h3>
-      <p>Una flashcard con 4 opciones y la correcta marcada.</p>
-
-      <form method="post" id="manual-form">
-        <input type="hidden" name="mode" value="manual" />
-
-        <div>
-          <label for="manual_deck_id">Deck destino (opcional)</label>
-          <select id="manual_deck_id" name="deck_id">
-            <option value="">Crear nuevo deck</option>
-            {% for d in decks %}
-              <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div id="manual-new-fields">
-          <div>
-            <label for="subject_choice">Asignatura</label>
-            <select id="subject_choice" name="subject_choice" required>
-              {% for s in subjects %}
-                <option value="{{ s.id }}">{{ s.name }}</option>
+          <label>Deck destino (opcional)
+            <select name="deck_id">
+              <option value="">Crear nuevo deck</option>
+              {% for d in decks %}
+                <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
               {% endfor %}
-              <option value="__new__">+ Añadir nueva asignatura…</option>
+            </select>
+          </label>
+
+          <label>Modelo
+            <select name="model">
+              {% for m in models %}
+                <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <label>Apunte / resumen
+            <select name="note_id" required>
+              <option value="">(elige uno)</option>
+              {% for n in notes %}
+                <option value="{{ n.id }}">
+                  {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <ul class="nav-list" data-nav>
+            <li><button class="nav-option btn-primary" type="submit" id="ai-create-btn">Generar con IA</button></li>
+            <li><a class="nav-option" href="{{ url_for('dashboard') }}">Volver al menú</a></li>
+          </ul>
+        </form>
+        <div class="loading-banner" id="ai-create-loading">Generando flashcards... ⏳</div>
+      </div>
+
+      <div class="mode-panel" data-mode-panel="manual">
+        <h3>Crear manual</h3>
+        <p>Una flashcard con 4 opciones y la correcta marcada.</p>
+
+        <form method="post" id="manual-form">
+          <input type="hidden" name="mode" value="manual" />
+
+          <div>
+            <label for="manual_deck_id">Deck destino (opcional)</label>
+            <select id="manual_deck_id" name="deck_id">
+              <option value="">Crear nuevo deck</option>
+              {% for d in decks %}
+                <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
+              {% endfor %}
             </select>
           </div>
 
-          <div id="new-subject-wrap" style="display:none;">
-            <label for="new_subject_name">Nueva asignatura</label>
-            <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Anatomía" />
-          </div>
-
-          <div>
-            <label for="title">Título del deck</label>
-            <input id="title" name="title" placeholder="Ej: Sistema nervioso" required />
-          </div>
-
-          <div>
-            <label for="exam_date">Fecha de examen</label>
-            <input id="exam_date" name="exam_date" type="date" />
-          </div>
-        </div>
-
-        <hr />
-
-        <div>
-          <label for="q">Pregunta</label>
-          <textarea id="q" name="q" rows="3" required></textarea>
-        </div>
-
-        <div>
-          <label>Respuestas (marca la correcta)</label>
-          {% for idx, letter in [(0,"A"), (1,"B"), (2,"C"), (3,"D")] %}
-            <div class="answer-row">
-              <input class="answer-radio" type="radio" name="correct" value="{{ idx }}" {% if idx == 0 %}checked{% endif %} required />
-              <input class="input answer-input" name="{{ ['a','b','c','d'][idx] }}" placeholder="Opción {{ letter }}" required />
+          <div id="manual-new-fields">
+            <div>
+              <label for="subject_choice">Asignatura</label>
+              <select id="subject_choice" name="subject_choice" required>
+                {% for s in subjects %}
+                  <option value="{{ s.id }}">{{ s.name }}</option>
+                {% endfor %}
+                <option value="__new__">+ Añadir nueva asignatura…</option>
+              </select>
             </div>
-          {% endfor %}
-        </div>
 
-        <ul class="nav-list" data-nav>
-          <li><button class="nav-option btn-primary" type="submit">Guardar flashcard</button></li>
-          <li><a class="nav-option" href="{{ url_for('dashboard') }}">Cancelar</a></li>
-        </ul>
-      </form>
+            <div id="new-subject-wrap" style="display:none;">
+              <label for="new_subject_name">Nueva asignatura</label>
+              <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Anatomía" />
+            </div>
+
+            <div>
+              <label for="title">Título del deck</label>
+              <input id="title" name="title" placeholder="Ej: Sistema nervioso" required />
+            </div>
+
+            <div>
+              <label for="exam_date">Fecha de examen</label>
+              <input id="exam_date" name="exam_date" type="date" />
+            </div>
+          </div>
+
+          <hr />
+
+          <div>
+            <label for="q">Pregunta</label>
+            <textarea id="q" name="q" rows="3" required></textarea>
+          </div>
+
+          <div>
+            <label>Respuestas (marca la correcta)</label>
+            {% for idx, letter in [(0,"A"), (1,"B"), (2,"C"), (3,"D")] %}
+              <div class="answer-row">
+                <input class="answer-radio" type="radio" name="correct" value="{{ idx }}" {% if idx == 0 %}checked{% endif %} required />
+                <input class="input answer-input" name="{{ ['a','b','c','d'][idx] }}" placeholder="Opción {{ letter }}" required />
+              </div>
+            {% endfor %}
+          </div>
+
+          <ul class="nav-list" data-nav>
+            <li><button class="nav-option btn-primary" type="submit">Guardar flashcard</button></li>
+            <li><a class="nav-option" href="{{ url_for('dashboard') }}">Cancelar</a></li>
+          </ul>
+        </form>
+      </div>
     </div>
   </section>
 
@@ -132,8 +143,11 @@
 
     const manualDeck = document.getElementById("manual_deck_id");
     const manualNewFields = document.getElementById("manual-new-fields");
+    const modeButtons = document.querySelectorAll("[data-mode-btn]");
+    const modePanels = document.querySelectorAll("[data-mode-panel]");
 
     function toggleSubject() {
+      if (!subjectSelect || !newWrap || !newInput) return;
       const isNew = subjectSelect.value === "__new__";
       newWrap.style.display = isNew ? "block" : "none";
       if (!isNew) newInput.value = "";
@@ -141,7 +155,7 @@
 
     function toggleManualDeck() {
       const hasDeck = manualDeck && manualDeck.value;
-      if (!manualNewFields) return;
+      if (!manualNewFields || !newInput) return;
 
       manualNewFields.style.display = hasDeck ? "none" : "block";
 
@@ -161,8 +175,10 @@
       }
     }
 
-    subjectSelect.addEventListener("change", toggleSubject);
-    toggleSubject();
+    if (subjectSelect) {
+      subjectSelect.addEventListener("change", toggleSubject);
+      toggleSubject();
+    }
 
     if (aiForm && aiBtn && aiLoading) {
       aiForm.addEventListener("submit", () => {
@@ -176,5 +192,24 @@
       manualDeck.addEventListener("change", toggleManualDeck);
       toggleManualDeck();
     }
+
+    function setMode(target) {
+      modeButtons.forEach((btn) => {
+        const isActive = btn.dataset.modeBtn === target;
+        btn.classList.toggle("is-active", isActive);
+        btn.setAttribute("aria-selected", isActive ? "true" : "false");
+      });
+      modePanels.forEach((panel) => {
+        const isActive = panel.dataset.modePanel === target;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+      });
+    }
+
+    modeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => setMode(btn.dataset.modeBtn));
+    });
+
+    setMode("ai");
   </script>
 {% endblock %}
