@@ -555,6 +555,11 @@ def create_app():
     def flashcards_create():
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
         notes = Note.query.filter_by(user_id=current_user.id).order_by(Note.updated_at.desc()).all()
+        decks = (
+            FlashcardDeck.query.filter_by(user_id=current_user.id)
+            .order_by(FlashcardDeck.updated_at.desc())
+            .all()
+        )
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
 
@@ -563,6 +568,14 @@ def create_app():
             selected_model = request.form.get("model") or selected_model
 
             if mode == "ai":
+                deck_id = request.form.get("deck_id", type=int)
+                target_deck = None
+                if deck_id:
+                    target_deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=current_user.id).first()
+                    if not target_deck:
+                        flash("Deck de destino inválido.", "error")
+                        return redirect(url_for("flashcards_create"))
+
                 note_id = request.form.get("note_id", type=int)
                 if not note_id:
                     flash("Selecciona un resumen/apunte para generar flashcards.", "error")
@@ -588,56 +601,71 @@ def create_app():
                     flash("Error inesperado generando flashcards.", "error")
                     return redirect(url_for("flashcards_create"))
 
-                deck = FlashcardDeck(
-                    user_id=current_user.id,
-                    subject_id=note.subject_id,
-                    title=note.title,
-                    exam_date=note.exam_date,
-                    source_note_id=note.id,
-                    flashcards=cards,
-                )
-                db.session.add(deck)
-                db.session.commit()
-                flash("Flashcards generadas y guardadas ✅", "success")
-                return redirect(url_for("flashcards_list"))
+                if target_deck:
+                    target_deck.flashcards = (target_deck.flashcards or []) + cards
+                    db.session.commit()
+                    flash(f"{len(cards)} flashcards añadidas al deck existente ✅", "success")
+                    return redirect(url_for("flashcards_list"))
+                else:
+                    deck = FlashcardDeck(
+                        user_id=current_user.id,
+                        subject_id=note.subject_id,
+                        title=note.title,
+                        exam_date=note.exam_date,
+                        source_note_id=note.id,
+                        flashcards=cards,
+                    )
+                    db.session.add(deck)
+                    db.session.commit()
+                    flash("Flashcards generadas y guardadas ✅", "success")
+                    return redirect(url_for("flashcards_list"))
 
             # ---- MANUAL ----
+            deck_id = request.form.get("deck_id", type=int)
+            target_deck = None
+            if deck_id:
+                target_deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=current_user.id).first()
+                if not target_deck:
+                    flash("Deck de destino inválido.", "error")
+                    return redirect(url_for("flashcards_create"))
+
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
 
-            if subject_choice == "__new__":
-                if not new_subject_name:
-                    flash("Escribe el nombre de la nueva asignatura.", "error")
-                    return redirect(url_for("flashcards_create"))
-                subject = Subject.query.filter_by(user_id=current_user.id, name=new_subject_name).first()
-                if not subject:
-                    subject = Subject(user_id=current_user.id, name=new_subject_name)
-                    db.session.add(subject)
-                    db.session.commit()
-            else:
-                try:
-                    subject_id = int(subject_choice)
-                except ValueError:
-                    flash("Selecciona una asignatura válida.", "error")
-                    return redirect(url_for("flashcards_create"))
-                subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
-                if not subject:
-                    flash("Asignatura inválida.", "error")
+            if not target_deck:
+                if subject_choice == "__new__":
+                    if not new_subject_name:
+                        flash("Escribe el nombre de la nueva asignatura.", "error")
+                        return redirect(url_for("flashcards_create"))
+                    subject = Subject.query.filter_by(user_id=current_user.id, name=new_subject_name).first()
+                    if not subject:
+                        subject = Subject(user_id=current_user.id, name=new_subject_name)
+                        db.session.add(subject)
+                        db.session.commit()
+                else:
+                    try:
+                        subject_id = int(subject_choice)
+                    except ValueError:
+                        flash("Selecciona una asignatura válida.", "error")
+                        return redirect(url_for("flashcards_create"))
+                    subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+                    if not subject:
+                        flash("Asignatura inválida.", "error")
+                        return redirect(url_for("flashcards_create"))
+
+                title = (request.form.get("title") or "").strip()
+                if not title:
+                    flash("El título es obligatorio.", "error")
                     return redirect(url_for("flashcards_create"))
 
-            title = (request.form.get("title") or "").strip()
-            if not title:
-                flash("El título es obligatorio.", "error")
-                return redirect(url_for("flashcards_create"))
-
-            exam_str = (request.form.get("exam_date") or "").strip()
-            exam_date = None
-            if exam_str:
-                try:
-                    exam_date = datetime.strptime(exam_str, "%Y-%m-%d").date()
-                except ValueError:
-                    flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
-                    return redirect(url_for("flashcards_create"))
+                exam_str = (request.form.get("exam_date") or "").strip()
+                exam_date = None
+                if exam_str:
+                    try:
+                        exam_date = datetime.strptime(exam_str, "%Y-%m-%d").date()
+                    except ValueError:
+                        flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
+                        return redirect(url_for("flashcards_create"))
 
             q = (request.form.get("q") or "").strip()
             a = (request.form.get("a") or "").strip()
@@ -656,18 +684,24 @@ def create_app():
 
             cards = [{"question": q, "options": [a, b, c, d], "correct_index": correct}]
 
-            deck = FlashcardDeck(
-                user_id=current_user.id,
-                subject_id=subject.id,
-                title=title,
-                exam_date=exam_date,
-                source_note_id=None,
-                flashcards=cards,
-            )
-            db.session.add(deck)
-            db.session.commit()
-            flash("Flashcard creada y guardada ✅", "success")
-            return redirect(url_for("flashcards_list"))
+            if target_deck:
+                target_deck.flashcards = (target_deck.flashcards or []) + cards
+                db.session.commit()
+                flash("Flashcard añadida al deck existente ✅", "success")
+                return redirect(url_for("flashcards_list"))
+            else:
+                deck = FlashcardDeck(
+                    user_id=current_user.id,
+                    subject_id=subject.id,
+                    title=title,
+                    exam_date=exam_date,
+                    source_note_id=None,
+                    flashcards=cards,
+                )
+                db.session.add(deck)
+                db.session.commit()
+                flash("Flashcard creada y guardada ✅", "success")
+                return redirect(url_for("flashcards_list"))
 
         return render_template(
             "flashcards_create.html",
@@ -675,6 +709,7 @@ def create_app():
             notes=notes,
             models=available_models,
             selected_model=selected_model,
+            decks=decks,
         )
 
     @app.route("/flashcards")
@@ -714,8 +749,45 @@ def create_app():
     def flashcards_edit(deck_id: int):
         deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=current_user.id).first_or_404()
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
+        notes = Note.query.filter_by(user_id=current_user.id).order_by(Note.updated_at.desc()).all()
+        available_models = fetch_models(app)
+        selected_model = app.config["LMSTUDIO_MODEL"]
 
         if request.method == "POST":
+            mode = (request.form.get("mode") or "manual").strip()
+
+            if mode == "append_ai":
+                note_id = request.form.get("note_id", type=int)
+                model = request.form.get("model") or selected_model
+                if not note_id:
+                    flash("Selecciona un resumen/apunte para generar flashcards.", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+
+                note = Note.query.filter_by(id=note_id, user_id=current_user.id).first()
+                if not note:
+                    flash("Resumen/apunte inválido.", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+
+                try:
+                    new_cards = lmstudio_generate_flashcards(app, model, note)
+                except Timeout:
+                    flash("El modelo tardó demasiado en responder.", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+                except RequestException:
+                    flash("No he podido conectar con LM Studio. ¿Está encendido?", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+                except (ValueError, json.JSONDecodeError) as e:
+                    flash(f"La IA devolvió un JSON inválido: {e}", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+                except Exception:
+                    flash("Error inesperado generando flashcards.", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+
+                deck.flashcards = (deck.flashcards or []) + new_cards
+                db.session.commit()
+                flash(f"{len(new_cards)} flashcards añadidas con IA ✅", "success")
+                return redirect(url_for("flashcards_edit", deck_id=deck.id))
+
             subject_id = request.form.get("subject_id", type=int)
             subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
             if not subject:
@@ -736,15 +808,17 @@ def create_app():
                     flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
                     return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
-            # Recoger cards desde form
+            # Recoger cards desde form (permitiendo huecos en índices)
             cards = []
-            # buscamos índices por campos card_q_<i>
-            i = 0
-            while True:
-                q_key = f"card_q_{i}"
-                if q_key not in request.form:
-                    break
-                qtext = (request.form.get(q_key) or "").strip()
+            idxs = sorted(
+                {
+                    int(k.split("_")[-1])
+                    for k in request.form.keys()
+                    if k.startswith("card_q_") and k.split("_")[-1].isdigit()
+                }
+            )
+            for i in idxs:
+                qtext = (request.form.get(f"card_q_{i}") or "").strip()
                 o0 = (request.form.get(f"card_o0_{i}") or "").strip()
                 o1 = (request.form.get(f"card_o1_{i}") or "").strip()
                 o2 = (request.form.get(f"card_o2_{i}") or "").strip()
@@ -753,7 +827,6 @@ def create_app():
 
                 # si la fila está vacía, la ignoramos
                 if not qtext and not o0 and not o1 and not o2 and not o3:
-                    i += 1
                     continue
 
                 if not qtext or not o0 or not o1 or not o2 or not o3 or correct is None:
@@ -764,7 +837,6 @@ def create_app():
                     return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
                 cards.append({"question": qtext, "options": [o0, o1, o2, o3], "correct_index": correct})
-                i += 1
 
             if not cards:
                 flash("Debes tener al menos 1 flashcard.", "error")
@@ -779,7 +851,14 @@ def create_app():
             flash("Flashcards actualizadas ✅", "success")
             return redirect(url_for("flashcards_list"))
 
-        return render_template("flashcards_edit.html", deck=deck, subjects=subjects)
+        return render_template(
+            "flashcards_edit.html",
+            deck=deck,
+            subjects=subjects,
+            notes=notes,
+            models=available_models,
+            selected_model=selected_model,
+        )
 
     @app.route("/flashcards/<int:deck_id>/delete", methods=["POST"])
     @login_required

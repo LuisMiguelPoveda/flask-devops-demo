@@ -3,16 +3,50 @@
 
 {% block content %}
 <section class="shell">
-  <header class="topbar">
+  <header class="section-header">
     <div>
       <h1 class="headline">Editar deck</h1>
       <p class="subtle">Edita metadatos y todas las flashcards.</p>
     </div>
-    <a class="link-pill" href="{{ url_for('flashcards_list') }}">Volver</a>
   </header>
+
+  <div class="card" style="margin-bottom:16px;">
+    <h3>Añadir 5 flashcards con IA</h3>
+    <p>Selecciona un apunte/resumen para generar y anexar nuevas tarjetas a este deck.</p>
+
+    <form method="post" class="stack" id="ai-append-form">
+      <input type="hidden" name="mode" value="append_ai" />
+
+      <label class="label">Modelo</label>
+      <select class="input" name="model">
+        {% for m in models %}
+          <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+
+      <label class="label">Apunte / resumen</label>
+      <select class="input" name="note_id" required>
+        <option value="">(elige uno)</option>
+        {% for n in notes %}
+          <option value="{{ n.id }}">
+            {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+
+      <div>
+        <button class="btn-primary" type="submit" id="ai-append-btn" {% if not notes %}disabled{% endif %}>Generar y añadir</button>
+        {% if not notes %}
+          <p class="subtle">Primero crea un apunte para poder generar flashcards con IA.</p>
+        {% endif %}
+      </div>
+    </form>
+    <div class="loading-banner" id="ai-append-loading">Generando y añadiendo flashcards... ⏳</div>
+  </div>
 
   <div class="card" style="padding:16px;">
     <form method="post" id="edit-form">
+      <input type="hidden" name="mode" value="manual" />
       <div>
         <label class="label">Asignatura</label>
         <select class="input" name="subject_id" required>
@@ -37,7 +71,11 @@
       <div id="cards">
         {% for c in deck.flashcards %}
           {% set card_idx = loop.index0 %}
-          <div class="card" style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+          <div class="card" data-card style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+              <strong>Flashcard {{ loop.index }}</strong>
+              <button type="button" class="link-pill" data-remove-card style="background:#fee2e2;color:#991b1b;">Eliminar</button>
+            </div>
             <label class="label">Pregunta</label>
             <textarea class="input" name="card_q_{{ loop.index0 }}" rows="3" required>{{ c.question }}</textarea>
 
@@ -68,10 +106,17 @@
 <script>
   const cardsDiv = document.getElementById("cards");
   const addBtn = document.getElementById("add-card");
+  const aiForm = document.getElementById("ai-append-form");
+  const aiBtn = document.getElementById("ai-append-btn");
+  const aiLoading = document.getElementById("ai-append-loading");
 
   function newCardHtml(i) {
     return `
-      <div class="card" style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+      <div class="card" data-card style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+          <strong>Flashcard ${i + 1}</strong>
+          <button type="button" class="link-pill" data-remove-card style="background:#fee2e2;color:#991b1b;">Eliminar</button>
+        </div>
         <label class="label">Pregunta</label>
         <textarea class="input" name="card_q_${i}" rows="3" required></textarea>
 
@@ -79,9 +124,9 @@
           <label class="label">Opciones (marca correcta)</label>
 
           ${[0,1,2,3].map(j => `
-            <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
-              <input type="radio" name="card_correct_${i}" value="${j}" ${j===0?'checked':''} required />
-              <input class="input" style="flex:1;" name="card_o${j}_${i}" required />
+            <div class="answer-row">
+              <input class="answer-radio" type="radio" name="card_correct_${i}" value="${j}" ${j===0?'checked':''} required />
+              <input class="input answer-input" name="card_o${j}_${i}" required />
             </div>
           `).join("")}
         </div>
@@ -89,9 +134,54 @@
     `;
   }
 
+  function renumberCards() {
+    const cards = Array.from(cardsDiv.querySelectorAll("[data-card]"));
+    cards.forEach((card, idx) => {
+      const q = card.querySelector("textarea");
+      if (q) q.name = `card_q_${idx}`;
+
+      const answerRows = card.querySelectorAll(".answer-row");
+      answerRows.forEach((row, j) => {
+        const radio = row.querySelector(".answer-radio");
+        const input = row.querySelector(".answer-input");
+        if (radio) {
+          radio.name = `card_correct_${idx}`;
+          radio.value = j;
+        }
+        if (input) input.name = `card_o${j}_${idx}`;
+      });
+
+      const title = card.querySelector("strong");
+      if (title) title.textContent = `Flashcard ${idx + 1}`;
+    });
+  }
+
   addBtn.addEventListener("click", () => {
-    const current = cardsDiv.querySelectorAll("textarea[name^='card_q_']").length;
+    const current = cardsDiv.querySelectorAll("[data-card]").length;
     cardsDiv.insertAdjacentHTML("beforeend", newCardHtml(current));
+    renumberCards();
   });
+
+  cardsDiv.addEventListener("click", (e) => {
+    if (e.target.matches("[data-remove-card]")) {
+      const card = e.target.closest("[data-card]");
+      if (card) {
+        card.remove();
+        renumberCards();
+      }
+    }
+  });
+
+  document.getElementById("edit-form").addEventListener("submit", () => {
+    renumberCards();
+  });
+
+  if (aiForm && aiBtn && aiLoading) {
+    aiForm.addEventListener("submit", () => {
+      aiBtn.disabled = true;
+      aiBtn.textContent = "Generando...";
+      aiLoading.style.display = "block";
+    });
+  }
 </script>
 {% endblock %}

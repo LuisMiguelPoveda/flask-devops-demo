@@ -3,20 +3,28 @@
 
 {% block content %}
   <section class="shell">
-    <header class="topbar">
+    <header class="section-header">
       <div>
         <h1 class="headline">Crear / Generar flashcards</h1>
         <p class="subtle">Elige generar con IA desde un apunte o crea una manual.</p>
       </div>
-      <a class="link-pill" href="{{ url_for('dashboard') }}">Volver al menú</a>
     </header>
 
     <div class="card" style="margin-bottom:16px;">
       <h3>Generar 5 con IA</h3>
       <p>Selecciona un apunte/resumen y un modelo. Se guardarán automáticamente.</p>
 
-      <form method="post" class="stack">
+      <form method="post" class="stack" id="ai-create-form">
         <input type="hidden" name="mode" value="ai" />
+
+        <label>Deck destino (opcional)
+          <select name="deck_id">
+            <option value="">Crear nuevo deck</option>
+            {% for d in decks %}
+              <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
+            {% endfor %}
+          </select>
+        </label>
 
         <label>Modelo
           <select name="model">
@@ -38,10 +46,11 @@
         </label>
 
         <ul class="nav-list" data-nav>
-          <li><button class="nav-option btn-primary" type="submit">Generar con IA</button></li>
+          <li><button class="nav-option btn-primary" type="submit" id="ai-create-btn">Generar con IA</button></li>
           <li><a class="nav-option" href="{{ url_for('dashboard') }}">Volver al menú</a></li>
         </ul>
       </form>
+      <div class="loading-banner" id="ai-create-loading">Generando flashcards... ⏳</div>
     </div>
 
     <div class="card">
@@ -52,28 +61,40 @@
         <input type="hidden" name="mode" value="manual" />
 
         <div>
-          <label for="subject_choice">Asignatura</label>
-          <select id="subject_choice" name="subject_choice" required>
-            {% for s in subjects %}
-              <option value="{{ s.id }}">{{ s.name }}</option>
+          <label for="manual_deck_id">Deck destino (opcional)</label>
+          <select id="manual_deck_id" name="deck_id">
+            <option value="">Crear nuevo deck</option>
+            {% for d in decks %}
+              <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
             {% endfor %}
-            <option value="__new__">+ Añadir nueva asignatura…</option>
           </select>
         </div>
 
-        <div id="new-subject-wrap" style="display:none;">
-          <label for="new_subject_name">Nueva asignatura</label>
-          <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Anatomía" />
-        </div>
+        <div id="manual-new-fields">
+          <div>
+            <label for="subject_choice">Asignatura</label>
+            <select id="subject_choice" name="subject_choice" required>
+              {% for s in subjects %}
+                <option value="{{ s.id }}">{{ s.name }}</option>
+              {% endfor %}
+              <option value="__new__">+ Añadir nueva asignatura…</option>
+            </select>
+          </div>
 
-        <div>
-          <label for="title">Título del deck</label>
-          <input id="title" name="title" placeholder="Ej: Sistema nervioso" required />
-        </div>
+          <div id="new-subject-wrap" style="display:none;">
+            <label for="new_subject_name">Nueva asignatura</label>
+            <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Anatomía" />
+          </div>
 
-        <div>
-          <label for="exam_date">Fecha de examen</label>
-          <input id="exam_date" name="exam_date" type="date" />
+          <div>
+            <label for="title">Título del deck</label>
+            <input id="title" name="title" placeholder="Ej: Sistema nervioso" required />
+          </div>
+
+          <div>
+            <label for="exam_date">Fecha de examen</label>
+            <input id="exam_date" name="exam_date" type="date" />
+          </div>
         </div>
 
         <hr />
@@ -105,6 +126,12 @@
     const subjectSelect = document.getElementById("subject_choice");
     const newWrap = document.getElementById("new-subject-wrap");
     const newInput = document.getElementById("new_subject_name");
+    const aiForm = document.getElementById("ai-create-form");
+    const aiBtn = document.getElementById("ai-create-btn");
+    const aiLoading = document.getElementById("ai-create-loading");
+
+    const manualDeck = document.getElementById("manual_deck_id");
+    const manualNewFields = document.getElementById("manual-new-fields");
 
     function toggleSubject() {
       const isNew = subjectSelect.value === "__new__";
@@ -112,7 +139,42 @@
       if (!isNew) newInput.value = "";
     }
 
+    function toggleManualDeck() {
+      const hasDeck = manualDeck && manualDeck.value;
+      if (!manualNewFields) return;
+
+      manualNewFields.style.display = hasDeck ? "none" : "block";
+
+      // enable/disable required fields based on creation vs append
+      const requiredInputs = manualNewFields.querySelectorAll("select, input");
+      requiredInputs.forEach((el) => {
+        el.disabled = hasDeck;
+        if (el.name === "title" || el.name === "subject_choice") {
+          el.required = !hasDeck;
+        }
+      });
+
+      if (hasDeck) {
+        newInput.value = "";
+      } else {
+        toggleSubject();
+      }
+    }
+
     subjectSelect.addEventListener("change", toggleSubject);
     toggleSubject();
+
+    if (aiForm && aiBtn && aiLoading) {
+      aiForm.addEventListener("submit", () => {
+        aiBtn.disabled = true;
+        aiBtn.textContent = "Generando...";
+        aiLoading.style.display = "block";
+      });
+    }
+
+    if (manualDeck) {
+      manualDeck.addEventListener("change", toggleManualDeck);
+      toggleManualDeck();
+    }
   </script>
 {% endblock %}
