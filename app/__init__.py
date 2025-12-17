@@ -928,6 +928,11 @@ def create_app():
         deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=current_user.id).first_or_404()
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
         notes = Note.query.filter_by(user_id=current_user.id).order_by(Note.updated_at.desc()).all()
+        other_decks = (
+            FlashcardDeck.query.filter(FlashcardDeck.user_id == current_user.id, FlashcardDeck.id != deck.id)
+            .order_by(FlashcardDeck.updated_at.desc())
+            .all()
+        )
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
 
@@ -959,6 +964,20 @@ def create_app():
                 db.session.add(job)
                 db.session.commit()
                 flash("Generación de flashcards encolada ✅", "success")
+                return redirect(url_for("flashcards_edit", deck_id=deck.id))
+
+            if mode == "merge":
+                merge_deck_id = request.form.get("merge_deck_id", type=int)
+                source = None
+                if merge_deck_id:
+                    source = FlashcardDeck.query.filter_by(id=merge_deck_id, user_id=current_user.id).first()
+                if not source:
+                    flash("Deck a combinar inválido.", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
+
+                deck.flashcards = (deck.flashcards or []) + (source.flashcards or [])
+                db.session.commit()
+                flash(f"Decks combinados ✅ Ahora hay {len(deck.flashcards)} flashcards.", "success")
                 return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
             subject_id = request.form.get("subject_id", type=int)
@@ -1029,6 +1048,7 @@ def create_app():
             deck=deck,
             subjects=subjects,
             notes=notes,
+            other_decks=other_decks,
             models=available_models,
             selected_model=selected_model,
             jobs=Job.query.filter_by(user_id=current_user.id).order_by(Job.created_at.desc()).limit(10).all(),

@@ -102,6 +102,24 @@
     </form>
   </div>
 
+  {% if other_decks|length %}
+    <div class="card" style="margin-top:12px;">
+      <h3>Combinar con otro deck</h3>
+      <form method="post">
+        <input type="hidden" name="mode" value="merge" />
+        <label class="label">Elige deck a fusionar en este</label>
+        <select class="input" name="merge_deck_id" required>
+          <option value="">(elige uno)</option>
+          {% for d in other_decks %}
+            <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
+          {% endfor %}
+        </select>
+        <p class="subtle">Se añadirán todas las flashcards del deck elegido a este deck.</p>
+        <button class="btn-primary" type="submit">Combinar</button>
+      </form>
+    </div>
+  {% endif %}
+
   {% if jobs %}
     <div class="card" style="margin-top:12px;">
       <h3>Tu cola de trabajos</h3>
