@@ -204,6 +204,7 @@ def create_app():
 
             if user and password and check_password_hash(user.password_hash, password):
                 login_user(user)
+                flash("Sesión iniciada ✅", "login_success")
                 return redirect(url_for("dashboard"))
 
             flash("Usuario o contraseña incorrectos.", "error")

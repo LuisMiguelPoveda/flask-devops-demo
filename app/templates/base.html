@@ -46,7 +46,22 @@
       </a>
     {% endif %}
 
+    {% if current_user.is_authenticated %}
+      <div class="mascot" id="mascot-root" aria-hidden="true">
+        <div class="mascot__bubble" data-mascot-bubble hidden></div>
+        <div class="mascot__card" data-mascot-card hidden>
+          <p data-mascot-card-text></p>
+        </div>
+        <div class="mascot__sprite">
+          <img data-mascot-img src="{{ url_for('static', filename='img/mascot/idle1.gif') }}" alt="Mascota" />
+        </div>
+      </div>
+    {% endif %}
+
     <!--defer + cache busting -->
     <script defer src="{{ url_for('static', filename='js/nav.js') }}?v=1"></script>
+    {% if current_user.is_authenticated %}
+      <script defer src="{{ url_for('static', filename='js/mascot.js') }}?v=4"></script>
+    {% endif %}
   </body>
 </html>
