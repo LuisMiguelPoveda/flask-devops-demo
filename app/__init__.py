@@ -3,12 +3,14 @@ import json
 import time
 import threading
 from datetime import datetime
+from pathlib import Path
 
 import requests
 from requests.exceptions import Timeout, RequestException
+from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_login import (
     LoginManager,
     login_user,
@@ -26,6 +28,49 @@ MAX_UPLOAD_BYTES = 250 * 1024
 MAX_TEXT_CHARS = 30_000
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
+
+
+def simple_format_note(text: str) -> Markup:
+    """
+    Convierte texto plano con encabezados '#' y viñetas '*'/'-' en HTML simple.
+    Escapa contenido para evitar XSS.
+    """
+    lines = (text or "").splitlines()
+    html_parts = []
+    in_list = False
+
+    def close_list():
+        nonlocal in_list
+        if in_list:
+            html_parts.append("</ul>")
+            in_list = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            close_list()
+            continue
+
+        if stripped.startswith("###"):
+            close_list()
+            html_parts.append(f"<h4>{escape(stripped.lstrip('#').strip())}</h4>")
+        elif stripped.startswith("##"):
+            close_list()
+            html_parts.append(f"<h3>{escape(stripped.lstrip('#').strip())}</h3>")
+        elif stripped.startswith("#"):
+            close_list()
+            html_parts.append(f"<h2>{escape(stripped.lstrip('#').strip())}</h2>")
+        elif stripped.startswith(("* ", "- ")):
+            if not in_list:
+                html_parts.append("<ul>")
+                in_list = True
+            html_parts.append(f"<li>{escape(stripped[2:].strip())}</li>")
+        else:
+            close_list()
+            html_parts.append(f"<p>{escape(stripped)}</p>")
+
+    close_list()
+    return Markup("".join(html_parts))
 
 
 def allowed_file(filename: str) -> bool:
@@ -77,9 +122,9 @@ def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date
     )
 
 
-def _parse_and_validate_flashcards_json(raw: str) -> list[dict]:
+def _parse_and_validate_flashcards_json(raw: str, expected_count: int) -> list[dict]:
     """
-    Esperamos EXACTAMENTE 5 flashcards:
+    Esperamos EXACTAMENTE expected_count flashcards:
     [
       {"question": str, "options": [str,str,str,str], "correct_index": 0..3}
     ]
@@ -93,8 +138,8 @@ def _parse_and_validate_flashcards_json(raw: str) -> list[dict]:
 
     data = json.loads(cleaned)
 
-    if not isinstance(data, list) or len(data) != 5:
-        raise ValueError("El JSON debe ser una lista de 5 flashcards.")
+    if not isinstance(data, list) or len(data) != expected_count:
+        raise ValueError(f"El JSON debe ser una lista de {expected_count} flashcards.")
 
     for i, card in enumerate(data, start=1):
         if not isinstance(card, dict):
@@ -111,13 +156,14 @@ def _parse_and_validate_flashcards_json(raw: str) -> list[dict]:
     return data
 
 
-def lmstudio_generate_flashcards(app, model: str, note: Note) -> list[dict]:
+def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5) -> list[dict]:
     """
-    Genera 5 flashcards a partir del contenido del apunte/resumen.
+    Genera N flashcards a partir del contenido del apunte/resumen.
     Devuelve lista de dicts validada.
     """
+    count = max(1, min(count, 50))
     system_prompt = (
-        "Genera exactamente 5 flashcards de examen a partir del texto. "
+        f"Genera exactamente {count} flashcards de examen a partir del texto. "
         "Devuelve SOLO un JSON válido (sin texto extra, sin markdown). "
         "Formato: "
         "["
@@ -136,8 +182,8 @@ def lmstudio_generate_flashcards(app, model: str, note: Note) -> list[dict]:
 
     schema = {
         "type": "array",
-        "minItems": 5,
-        "maxItems": 5,
+        "minItems": count,
+        "maxItems": count,
         "items": {
             "type": "object",
             "properties": {
@@ -165,7 +211,10 @@ def lmstudio_generate_flashcards(app, model: str, note: Note) -> list[dict]:
         },
         temperature=0.2,
     )
-    return _parse_and_validate_flashcards_json(raw)
+    cards = _parse_and_validate_flashcards_json(raw, expected_count=count)
+    if len(cards) != count:
+        raise ValueError(f"El modelo devolvió {len(cards)} flashcards, se esperaban {count}.")
+    return cards
 
 
 def process_job(app, job: Job):
@@ -192,6 +241,8 @@ def process_job(app, job: Job):
                 content = lmstudio_summarize_text(app, model, subject.name, title, exam_date_str, filename, text)
                 if not content.strip():
                     return "error", None, "El modelo devolvió un resumen vacío."
+                # Prepend title to content to ensure first line carries it.
+                content = f"{title}\n\n{content}"
 
                 exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d").date() if exam_date_str and exam_date_str != "No indicada" else None
                 note = Note(
@@ -214,12 +265,13 @@ def process_job(app, job: Job):
                 deck_id = payload.get("deck_id")
                 model = payload.get("model") or app.config["LMSTUDIO_MODEL"]
                 custom_title = (payload.get("ai_deck_title") or "").strip()
+                count = int(payload.get("count") or 5)
 
                 note = Note.query.filter_by(id=note_id, user_id=user_id).first()
                 if not note:
                     return "error", None, "Apunte/resumen inválido."
 
-                cards = lmstudio_generate_flashcards(app, model, note)
+                cards = lmstudio_generate_flashcards(app, model, note, count=count)
 
                 if job.type == "flashcards_ai_append":
                     deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=user_id).first()
@@ -419,6 +471,10 @@ def create_app():
         )
         return jsonify({"titles": [r[0] for r in rows if r[0]]})
 
+    @app.template_filter("note_fmt")
+    def note_fmt_filter(text: str):
+        return simple_format_note(text)
+
     @app.route("/api/jobs/queue")
     @login_required
     def api_jobs_queue():
@@ -562,9 +618,6 @@ def create_app():
                     return redirect(url_for("add_notes"))
 
             title = (request.form.get("title") or "").strip()
-            if not title:
-                flash("El título es obligatorio.", "error")
-                return redirect(url_for("add_notes"))
 
             exam_str = ((request.form.get("exam_date_manual") or "").strip() or (request.form.get("exam_date_choice") or "").strip())
             exam_date = None
@@ -577,54 +630,73 @@ def create_app():
 
             manual_text = (request.form.get("manual_text") or "").strip()
             manual_mode = request.form.get("manual_mode") == "on"
+            manual_file_mode = request.form.get("manual_file_mode") == "on"
 
-            if manual_mode:
-                if not manual_text:
-                    flash("Si eliges modo manual, debes escribir el contenido.", "error")
+            upload = request.files.get("file")
+            file_text = ""
+            if upload and upload.filename:
+                if not allowed_file(upload.filename):
+                    flash("Solo se permiten archivos .txt.", "error")
                     return redirect(url_for("add_notes"))
+                filename = secure_filename(upload.filename)
+                file_bytes = upload.read()
+                if not file_bytes:
+                    flash("El archivo está vacío.", "error")
+                    return redirect(url_for("add_notes"))
+                if len(file_bytes) > MAX_UPLOAD_BYTES:
+                    flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
+                    return redirect(url_for("add_notes"))
+                try:
+                    file_text = file_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    file_text = file_bytes.decode("utf-8", errors="ignore")
+                file_text = file_text.strip()
+                if not file_text:
+                    flash("El TXT no contiene texto legible.", "error")
+                    return redirect(url_for("add_notes"))
+                if len(file_text) > MAX_TEXT_CHARS:
+                    file_text = file_text[:MAX_TEXT_CHARS]
+            else:
+                filename = None
+
+            content_text = manual_text if manual_text else file_text
+            if manual_mode or manual_file_mode:
+                if not content_text:
+                    flash("Si eliges guardar sin IA, sube un TXT o escribe contenido.", "error")
+                    return redirect(url_for("add_notes"))
+                # default title: nombre de archivo sin extensión + " examen " + fecha + " creado " + fecha de subida
+                if title.strip():
+                    final_title = title.strip()
+                else:
+                    base_name = Path(filename).stem if filename else subject.name
+                    created_str = datetime.utcnow().date().isoformat()
+                    exam_part = exam_date.isoformat() if exam_date else ""
+                    final_title = f"{base_name} examen {exam_part} creado {created_str}".strip()
                 note = Note(
                     user_id=current_user.id,
                     subject_id=subject.id,
-                    title=title,
+                    title=final_title,
                     exam_date=exam_date,
-                    original_filename=None,
-                    content=manual_text,
+                    original_filename=filename,
+                    content=content_text,
                     ai_used=False,
                 )
                 db.session.add(note)
                 db.session.commit()
-                flash("Apuntes guardados (manual) ✅", "success")
+                flash("Apuntes guardados (sin IA) ✅", "success")
                 return redirect(url_for("dashboard"))
 
-            upload = request.files.get("file")
-            if not upload or not upload.filename:
-                flash("Selecciona un archivo .txt o usa modo manual.", "error")
-                return redirect(url_for("add_notes"))
-            if not allowed_file(upload.filename):
-                flash("Solo se permiten archivos .txt (o usa modo manual).", "error")
+            if not file_text:
+                flash("Para usar IA sube un TXT válido.", "error")
                 return redirect(url_for("add_notes"))
 
-            filename = secure_filename(upload.filename)
-            file_bytes = upload.read()
-
-            if not file_bytes:
-                flash("El archivo está vacío.", "error")
-                return redirect(url_for("add_notes"))
-            if len(file_bytes) > MAX_UPLOAD_BYTES:
-                flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
-                return redirect(url_for("add_notes"))
-
-            try:
-                text = file_bytes.decode("utf-8")
-            except UnicodeDecodeError:
-                text = file_bytes.decode("utf-8", errors="ignore")
-            text = text.strip()
-            if not text:
-                flash("El TXT no contiene texto legible.", "error")
-                return redirect(url_for("add_notes"))
-            if len(text) > MAX_TEXT_CHARS:
-                text = text[:MAX_TEXT_CHARS]
-
+            if title.strip():
+                final_title = title.strip()
+            else:
+                base_name = Path(filename or "input").stem
+                created_str = datetime.utcnow().date().isoformat()
+                exam_part = exam_date.isoformat() if exam_date else ""
+                final_title = f"{base_name} examen {exam_part} creado {created_str}".strip()
             exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
             job = Job(
                 user_id=current_user.id,
@@ -632,10 +704,10 @@ def create_app():
                 payload={
                     "user_id": current_user.id,
                     "subject_id": subject.id,
-                    "title": title,
+                    "title": final_title,
                     "exam_date": exam_date_str,
-                    "filename": filename,
-                    "text": text,
+                    "filename": filename or "input.txt",
+                    "text": file_text,
                     "model": selected_model,
                 },
             )
@@ -685,6 +757,28 @@ def create_app():
         notes = q.order_by(Note.updated_at.desc()).all()
         return render_template("notes_list.html", subjects=subjects, notes=notes, filters={"subject_id": subject_id or "", "exam_date": exam_date_str, "title": title_q})
 
+    @app.route("/notes/merge", methods=["POST"])
+    @login_required
+    def notes_merge():
+        target_id = request.form.get("target_note", type=int)
+        source_id = request.form.get("source_note", type=int)
+        if not target_id or not source_id or target_id == source_id:
+            flash("Elige apuntes válidos (origen y destino distintos).", "error")
+            return redirect(url_for("notes_list"))
+
+        target = Note.query.filter_by(id=target_id, user_id=current_user.id).first()
+        source = Note.query.filter_by(id=source_id, user_id=current_user.id).first()
+        if not target or not source:
+            flash("No se encontraron los apuntes seleccionados.", "error")
+            return redirect(url_for("notes_list"))
+
+        merged = (target.content or "") + "\n\n" + (source.content or "")
+        target.content = merged.strip()
+        target.updated_at = datetime.utcnow()
+        db.session.commit()
+        flash("Apuntes combinados ✅", "success")
+        return redirect(url_for("notes_list"))
+
     @app.route("/notes/<int:note_id>/edit", methods=["GET", "POST"])
     @login_required
     def note_edit(note_id: int):
@@ -699,6 +793,9 @@ def create_app():
                 return redirect(url_for("note_edit", note_id=note.id))
 
             title = (request.form.get("title") or "").strip()
+            if not title:
+                # si no hay título, usamos la primera línea del contenido
+                title = (request.form.get("content") or "").strip().splitlines()[0] if (request.form.get("content") or "").strip() else ""
             if not title:
                 flash("El título es obligatorio.", "error")
                 return redirect(url_for("note_edit", note_id=note.id))
@@ -781,6 +878,7 @@ def create_app():
 
                 job_type = "flashcards_ai_append" if target_deck else "flashcards_ai_new"
                 custom_title = (request.form.get("ai_deck_title") or "").strip()
+                count = request.form.get("count", type=int) or 5
                 job = Job(
                     user_id=current_user.id,
                     type=job_type,
@@ -790,6 +888,7 @@ def create_app():
                         "deck_id": target_deck.id if target_deck else None,
                         "model": selected_model,
                         "ai_deck_title": custom_title,
+                        "count": count,
                     },
                 )
                 db.session.add(job)

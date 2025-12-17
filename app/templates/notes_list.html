@@ -18,7 +18,7 @@
       </div>
 
       <div>
-        <label for="exam_date">Fecha examen (YYYY-MM-DD)</label>
+        <label for="exam_date">Fecha de examen</label>
         <input id="exam_date" name="exam_date" type="date" value="{{ filters.exam_date }}" />
       </div>
 
@@ -40,13 +40,14 @@
           <h3>{{ n.title }}</h3>
           <p>
             <strong>Asignatura:</strong> {{ n.subject.name }} |
-            <strong>Fecha:</strong> {{ n.exam_date if n.exam_date else "—" }} |
-            <strong>Modo:</strong> {{ "IA" if n.ai_used else "Manual" }}
+            <strong>Fecha de examen:</strong> {{ n.exam_date if n.exam_date else "—" }} |
+            <strong>Modo:</strong> {{ "IA" if n.ai_used else "Manual" }} |
+            <strong>Creado:</strong> {{ n.created_at.strftime("%Y-%m-%d") if n.created_at else "—" }}
           </p>
 
           <details>
             <summary>Ver contenido</summary>
-            <pre style="white-space: pre-wrap;">{{ n.content }}</pre>
+            <div style="margin-top:8px;">{{ n.content|note_fmt }}</div>
           </details>
 
           <div style="margin-top: .75rem;">
@@ -60,6 +61,34 @@
           </div>
         </div>
       {% endfor %}
+    {% endif %}
+
+    {% if notes|length > 1 %}
+      <div class="card" style="margin-top:1rem;">
+        <h3>Combinar apuntes</h3>
+        <form method="post" action="{{ url_for('notes_merge') }}">
+          <div>
+            <label for="target_note">Destino</label>
+            <select id="target_note" name="target_note" required>
+              <option value="">(elige destino)</option>
+              {% for n in notes %}
+                <option value="{{ n.id }}">{{ n.title }} — {{ n.subject.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="source_note">Origen (se copiará su contenido)</label>
+            <select id="source_note" name="source_note" required>
+              <option value="">(elige origen)</option>
+              {% for n in notes %}
+                <option value="{{ n.id }}">{{ n.title }} — {{ n.subject.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="subtle">Se añadirá el contenido del origen al final del destino. Ambos apuntes permanecerán.</p>
+          <button type="submit">Combinar</button>
+        </form>
+      </div>
     {% endif %}
   </div>
 {% endblock %}

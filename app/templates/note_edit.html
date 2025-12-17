@@ -17,8 +17,9 @@
       </div>
 
       <div>
-        <label for="title">Título</label>
-        <input id="title" name="title" value="{{ note.title }}" required />
+        <label for="title">Título (opcional)</label>
+        <input id="title" name="title" value="{{ note.title }}" />
+        <small>Si lo dejas vacío, se usará la primera línea del contenido.</small>
       </div>
 
       <div>

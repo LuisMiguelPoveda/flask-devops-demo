@@ -40,9 +40,9 @@
       </div>
 
       <div>
-        <label for="title">Título de los apuntes</label>
-        <input id="title" name="title" placeholder="Ej: Tema 3 - Derivadas" required />
-        <small>Este título se usará para identificar y filtrar.</small>
+        <label for="title">Título de los apuntes (opcional)</label>
+        <input id="title" name="title" placeholder="Ej: Tema 3 - Derivadas" />
+        <small>Si lo dejas vacío, usaremos la primera línea del contenido.</small>
       </div>
 
       <div>
@@ -61,7 +61,12 @@
 
       <div class="check-row">
         <input type="checkbox" id="manual_mode" name="manual_mode" />
-        <label for="manual_mode" style="margin:0;">Guardar manualmente (sin IA)</label>
+        <label for="manual_mode" style="margin:0;">Guardar texto escrito (sin IA)</label>
+      </div>
+
+      <div class="check-row">
+        <input type="checkbox" id="manual_file_mode" name="manual_file_mode" />
+        <label for="manual_file_mode" style="margin:0;">Guardar archivo TXT sin IA</label>
       </div>
 
       <div id="manual-wrap" style="display:none;">
@@ -70,7 +75,7 @@
       </div>
 
       <div id="file-wrap">
-        <label for="file">Archivo TXT (solo si usas IA)</label>
+        <label for="file">Archivo TXT</label>
         <input id="file" name="file" type="file" accept=".txt,text/plain" />
       </div>
 
@@ -107,6 +112,7 @@
     const examManual = document.getElementById("exam_date_manual");
 
     const manualMode = document.getElementById("manual_mode");
+    const manualFileMode = document.getElementById("manual_file_mode");
     const manualWrap = document.getElementById("manual-wrap");
     const fileWrap = document.getElementById("file-wrap");
 
@@ -144,8 +150,14 @@
 
     function updateModeUI() {
       const isManual = manualMode.checked;
+      const isManualFile = manualFileMode.checked;
       manualWrap.style.display = isManual ? "block" : "none";
-      fileWrap.style.display = isManual ? "none" : "block";
+      fileWrap.style.display = (isManual || isManualFile || !isManual) ? "block" : "block";
+      // si marcamos manual_file_mode, desmarcamos manual_mode para evitar confusión de UI
+      if (isManualFile) {
+        manualMode.checked = false;
+        manualWrap.style.display = "none";
+      }
     }
 
     subjectSelect.addEventListener("change", updateSubjectUI);
@@ -159,6 +171,7 @@
     });
 
     manualMode.addEventListener("change", updateModeUI);
+    manualFileMode.addEventListener("change", updateModeUI);
 
     if (form && loading && submitBtn) {
       form.addEventListener("submit", function () {

@@ -21,8 +21,8 @@
       </div>
 
       <div class="mode-panel is-active" data-mode-panel="ai">
-        <h3>Generar 5 con IA</h3>
-        <p>Selecciona un apunte/resumen y un modelo. Se guardarán automáticamente.</p>
+        <h3>Generar flashcards con IA</h3>
+        <p>Selecciona un apunte/resumen, modelo y cuántas flashcards quieres. Se guardarán automáticamente.</p>
 
         <form method="post" class="stack" id="ai-create-form">
           <input type="hidden" name="mode" value="ai" />
@@ -48,7 +48,13 @@
             </select>
           </label>
 
-          <label>Apunte / resumen
+          <label>Cantidad de flashcards
+            <input type="number" name="count" value="5" min="1" max="50" required />
+          </label>
+
+          
+          <p class="subtle">Puedes generar entre 1 y 50 flashcards en un solo paso.</p>
+<label>Apunte / resumen
             <select name="note_id" required>
               <option value="">(elige uno)</option>
               {% for n in notes %}
