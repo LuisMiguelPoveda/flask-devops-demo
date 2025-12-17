@@ -3,6 +3,7 @@
   if (!root) return;
   const justLoggedIn = (document.body.dataset.justLoggedIn || "") === "1";
   const justRegistered = (document.body.dataset.justRegistered || "") === "1";
+  const currentPage = document.body.dataset.page || "";
 
   const img = root.querySelector("[data-mascot-img]");
   const bubble = root.querySelector("[data-mascot-bubble]");
@@ -10,11 +11,10 @@
   const cardText = root.querySelector("[data-mascot-card-text]");
 
   // Paths where you should place your GIF/WebP files
-  const idleSprites = [
-    "/static/img/mascot/idle1.gif",
-    "/static/img/mascot/idle2.gif",
-    "/static/img/mascot/idle3.gif",
-  ];
+  const idleSprites =
+    currentPage === "ask_profe"
+      ? ["/static/img/mascot/profe.gif"]
+      : ["/static/img/mascot/idle1.gif", "/static/img/mascot/idle2.gif", "/static/img/mascot/idle3.gif"];
   const actions = {
     celebrate: "/static/img/mascot/celebrate.gif",
   };
@@ -24,12 +24,20 @@
     "/static/img/mascot/angry3.gif",
   ];
 
-  const idleTips = [
-    "Tip: Genera 5 flashcards desde un apunte en segundos.",
-    "Recuerda revisar tus flashcards antes del examen.",
-    "Los apuntes más recientes aparecen arriba en las listas.",
-    "Puedes editar un deck y añadir más tarjetas cuando quieras.",
-  ];
+  const idleTips =
+    currentPage === "ask_profe"
+      ? [
+          "Estoy aquí para ayudarte, pregúntame con confianza.",
+          "Si algo no queda claro, dime y lo explico de otra forma.",
+          "Respira hondo, vamos paso a paso con tus dudas.",
+          "Cuéntame qué tema quieres reforzar y lo vemos juntos.",
+        ]
+      : [
+          "Tip: Genera 5 flashcards desde un apunte en segundos.",
+          "Recuerda revisar tus flashcards antes del examen.",
+          "Los apuntes más recientes aparecen arriba en las listas.",
+          "Puedes editar un deck y añadir más tarjetas cuando quieras.",
+        ];
 
   let idleTimer = null;
   let tipTimer = null;
@@ -75,7 +83,7 @@
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       hideTip();
-      scheduleTip(15000);
+      scheduleTip(90000);
     }, duration);
   }
 
@@ -151,7 +159,7 @@
       const angry = pick(angrySprites);
       if (angry) {
         actions.angry = angry;
-        trigger("angry", { text: "¡Hey! 😤", duration: 3000 });
+        trigger("angry", { duration: 3000 });
       }
     });
   }

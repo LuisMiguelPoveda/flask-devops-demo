@@ -318,7 +318,13 @@ def create_app():
                     payload = {
                         "model": selected_model,
                         "messages": [
-                            {"role": "system", "content": "Actúa como un profesor paciente y claro. Responde de forma concisa"},
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Eres un profesor humano paciente y amable. Responde de forma clara, completa y conversacional, "
+                                    "sin usar asteriscos ni acciones roleplay; escribe como hablarías en la vida real."
+                                ),
+                            },
                             {"role": "user", "content": question},
                         ],
                         "temperature": 0.7,
