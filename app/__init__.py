@@ -6,7 +6,7 @@ import requests
 from requests.exceptions import Timeout, RequestException
 from werkzeug.utils import secure_filename
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, session
 from flask_login import (
     LoginManager,
     login_user,
@@ -184,6 +184,12 @@ def create_app():
     login_manager.login_view = "login"
     login_manager.init_app(app)
 
+    @app.context_processor
+    def inject_login_flag():
+        just_logged_in = session.pop("just_logged_in", None)
+        just_registered = session.pop("just_registered", None)
+        return {"just_logged_in": bool(just_logged_in), "just_registered": bool(just_registered)}
+
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.get(int(user_id))
@@ -205,6 +211,7 @@ def create_app():
             if user and password and check_password_hash(user.password_hash, password):
                 login_user(user)
                 flash("Sesión iniciada ✅", "login_success")
+                session["just_logged_in"] = True
                 return redirect(url_for("dashboard"))
 
             flash("Usuario o contraseña incorrectos.", "error")
@@ -233,6 +240,9 @@ def create_app():
             db.session.commit()
 
             login_user(new_user)
+            flash("Cuenta creada e inicio de sesión ✅", "login_success")
+            session["just_logged_in"] = True
+            session["just_registered"] = True
             return redirect(url_for("dashboard"))
 
         return render_template("register.html")

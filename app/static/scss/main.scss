@@ -616,7 +616,7 @@ button:disabled {
 ========================================================= */
 .mascot {
   position: fixed;
-  right: 36px;
+  right: 52px;
   bottom: 12px;
   width: 140px;
   height: 160px;
@@ -634,6 +634,8 @@ button:disabled {
   align-items: flex-end;
   justify-content: center;
   filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.35));
+  pointer-events: auto;
+  cursor: pointer;
 
   img {
     max-width: 120px;
@@ -747,7 +749,7 @@ button:disabled {
   }
 
   .mascot {
-    right: 28px;
+    right: 44px;
     bottom: 8px;
     width: 120px;
     height: 140px;

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=3">
   </head>
 
-  <body>
+  <body data-just-logged-in="{{ '1' if just_logged_in else '' }}" data-just-registered="{{ '1' if just_registered else '' }}">
     <header class="topbar">
       <div class="topbar__inner">
         <a class="brand" href="{{ url_for('dashboard') }}">Flask DevOps Demo</a>
@@ -61,7 +61,7 @@
     <!--defer + cache busting -->
     <script defer src="{{ url_for('static', filename='js/nav.js') }}?v=1"></script>
     {% if current_user.is_authenticated %}
-      <script defer src="{{ url_for('static', filename='js/mascot.js') }}?v=4"></script>
+      <script defer src="{{ url_for('static', filename='js/mascot.js') }}?v=6"></script>
     {% endif %}
   </body>
 </html>

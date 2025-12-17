@@ -1,6 +1,8 @@
 (function () {
   const root = document.getElementById("mascot-root");
   if (!root) return;
+  const justLoggedIn = (document.body.dataset.justLoggedIn || "") === "1";
+  const justRegistered = (document.body.dataset.justRegistered || "") === "1";
 
   const img = root.querySelector("[data-mascot-img]");
   const bubble = root.querySelector("[data-mascot-bubble]");
@@ -16,6 +18,11 @@
   const actions = {
     celebrate: "/static/img/mascot/celebrate.gif",
   };
+  const angrySprites = [
+    "/static/img/mascot/angry1.gif",
+    "/static/img/mascot/angry2.gif",
+    "/static/img/mascot/angry3.gif",
+  ];
 
   const idleTips = [
     "Tip: Genera 5 flashcards desde un apunte en segundos.",
@@ -28,40 +35,48 @@
   let tipTimer = null;
   let revertTimer = null;
   let currentAction = null;
-  let cardTimer = null;
-  let bubbleVisible = false;
-  let cardVisible = false;
+  let hideTimer = null;
+  let currentTip = null; // "bubble" | "card" | null
 
   function pick(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
   }
 
-  function showBubble(message) {
-    if (!bubble) return;
-    if (bubbleVisible) return;
-    bubble.textContent = message;
-    bubble.hidden = false;
-    bubble.classList.add("is-visible");
-    bubbleVisible = true;
-    setTimeout(() => {
+  function hideTip() {
+    if (hideTimer) clearTimeout(hideTimer);
+    if (currentTip === "bubble" && bubble) {
       bubble.classList.remove("is-visible");
       bubble.hidden = true;
-      bubbleVisible = false;
-    }, 11400);
-  }
-
-  function showCardTip(message) {
-    if (!card || !cardText) return;
-    if (cardVisible) return;
-    cardText.textContent = message;
-    card.hidden = false;
-    card.classList.add("is-visible");
-    cardVisible = true;
-    setTimeout(() => {
+    }
+    if (currentTip === "card" && card) {
       card.classList.remove("is-visible");
       card.hidden = true;
-      cardVisible = false;
-    }, 14400);
+    }
+    currentTip = null;
+  }
+
+  function showTip({ variant, message, duration }) {
+    if (currentTip) return;
+    const text = message || pick(idleTips);
+    if (variant === "card") {
+      if (!card || !cardText) return;
+      cardText.textContent = text;
+      card.hidden = false;
+      card.classList.add("is-visible");
+      currentTip = "card";
+    } else {
+      if (!bubble) return;
+      bubble.textContent = text;
+      bubble.hidden = false;
+      bubble.classList.add("is-visible");
+      currentTip = "bubble";
+    }
+
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      hideTip();
+      scheduleTip(15000);
+    }, duration);
   }
 
   function setIdleSprite() {
@@ -77,32 +92,22 @@
     idleTimer = setInterval(setIdleSprite, 12000);
   }
 
-  function startTipLoop() {
-    if (tipTimer) clearInterval(tipTimer);
-    // primer tip rápido
-    setTimeout(() => {
-      if (!currentAction) showBubble(pick(idleTips));
-    }, 4000);
-    tipTimer = setInterval(() => {
-      if (currentAction) return;
-      showBubble(pick(idleTips));
-    }, 15000);
-  }
-
-  function startCardLoop() {
-    if (cardTimer) clearInterval(cardTimer);
-    // primer card temprano
-    setTimeout(() => {
-      if (!currentAction) showCardTip(pick(idleTips));
-    }, 9000);
-    cardTimer = setInterval(() => {
-      if (currentAction) return;
-      showCardTip(pick(idleTips));
-    }, 20000);
+  function scheduleTip(delay = 4000) {
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => {
+      if (currentAction || currentTip) {
+        scheduleTip(2000);
+        return;
+      }
+      const variant = Math.random() < 0.5 ? "bubble" : "card";
+      const duration = variant === "card" ? 14400 : 11400;
+      showTip({ variant, duration });
+    }, delay);
   }
 
   function trigger(action, opts = {}) {
     if (!img) return;
+    if (currentAction) return; // evita solapado de acciones
     const src = actions[action];
     if (!src) return;
     currentAction = action;
@@ -110,7 +115,7 @@
     img.src = src;
 
     if (opts.text) {
-      showBubble(opts.text);
+      showTip({ variant: "bubble", message: opts.text, duration: 11400 });
     }
 
     if (revertTimer) clearTimeout(revertTimer);
@@ -122,12 +127,11 @@
 
   function detectLoginSuccess() {
     const successFlash = document.querySelector(".flash--login_success");
-    if (successFlash) {
-      trigger("celebrate", { text: "Sesión iniciada, ¡bienvenido!" });
-      // Garantiza también un tip destacado al entrar al dashboard tras login
+    if (successFlash || justLoggedIn || justRegistered) {
+      trigger("celebrate", { text: justRegistered ? "Cuenta creada, ¡bienvenido!" : "Sesión iniciada, ¡bienvenido!" });
       setTimeout(() => {
-        if (!currentAction) {
-          showBubble("¡Listo para estudiar! Revisa tus flashcards.");
+        if (!currentAction && !currentTip) {
+          showTip({ variant: "bubble", message: "¡Listo para estudiar! Revisa tus flashcards.", duration: 11400 });
         }
       }, 1500);
     }
@@ -135,20 +139,32 @@
 
   // Start loops
   startIdleLoop();
-  startTipLoop();
-  startCardLoop();
+  scheduleTip();
   detectLoginSuccess();
+
+  // Permitir que el usuario moleste a la mascota
+  if (root && img) {
+    root.addEventListener("click", (e) => {
+      // evita que otros clics de la UI burbujeen
+      e.stopPropagation();
+      if (currentAction) return;
+      const angry = pick(angrySprites);
+      if (angry) {
+        actions.angry = angry;
+        trigger("angry", { text: "¡Hey! 😤", duration: 3000 });
+      }
+    });
+  }
 
   // Pause loops when tab hidden to save CPU
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       if (idleTimer) clearInterval(idleTimer);
-      if (tipTimer) clearInterval(tipTimer);
-      if (cardTimer) clearInterval(cardTimer);
+      if (tipTimer) clearTimeout(tipTimer);
+      if (hideTimer) clearTimeout(hideTimer);
     } else {
       startIdleLoop();
-      startTipLoop();
-      startCardLoop();
+      scheduleTip();
     }
   });
 })();
