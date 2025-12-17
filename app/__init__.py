@@ -26,10 +26,37 @@ from .models import db, User, Subject, Note, FlashcardDeck, Job
 
 
 ALLOWED_EXTENSIONS = {"txt", "pdf"}
-MAX_UPLOAD_BYTES = 250 * 1024
-MAX_TEXT_CHARS = 30_000
+# Permitimos hasta ~5 MB para poder subir PDFs grandes
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+# Límite de texto razonable para evitar desbordar la memoria
+MAX_TEXT_CHARS = 300_000
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
+
+
+def chunk_text_with_overlap(text: str, max_tokens: int = 6500, overlap: int = 500) -> list[str]:
+    """
+    Corta el texto en fragmentos aproximados de tokens (palabras) con solapamiento
+    para minimizar la pérdida de contexto entre partes.
+    """
+    tokens = (text or "").split()
+    if not tokens:
+        return []
+
+    max_tokens = max(1, max_tokens)
+    overlap = max(0, min(overlap, max_tokens - 1))
+    step = max_tokens - overlap if max_tokens > overlap else 1
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(tokens):
+        end = min(len(tokens), start + max_tokens)
+        chunk_tokens = tokens[start:end]
+        chunks.append(" ".join(chunk_tokens))
+        if end >= len(tokens):
+            break
+        start += step
+    return chunks
 
 
 def simple_format_note(text: str) -> Markup:
@@ -129,18 +156,27 @@ def lmstudio_chat(app, model: str, messages: list[dict], response_format: dict |
     return data["choices"][0]["message"]["content"].strip()
 
 
-def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date: str, filename: str, text: str) -> str:
+def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date: str, filename: str, text: str, chunk_index: int | None = None, total_chunks: int | None = None) -> str:
     system_prompt = (
         "Eres un profesor experto. Devuelve apuntes con la información clave en español, "
         "en formato de viñetas (bullet points) y con estructura clara. "
         "No inventes información. No incluyas introducción ni despedida."
     )
+    chunk_suffix = ""
+    chunk_hint = ""
+    if total_chunks and total_chunks > 1:
+        human_idx = (chunk_index or 0) + 1
+        chunk_suffix = f" (fragmento {human_idx} de {total_chunks})"
+        chunk_hint = (
+            "\nEste texto es un fragmento de un archivo más largo que se está procesando por partes. "
+            "Resume solo este fragmento, pero conserva continuidad y contexto para poder unirlo con el resto."
+        )
     user_prompt = (
         f"Asignatura: {subject}\n"
-        f"Título: {title}\n"
+        f"Título: {title}{chunk_suffix}\n"
         f"Fecha de examen: {exam_date}\n"
         f"Archivo: {filename}\n\n"
-        f"TEXTO A RESUMIR:\n{text}"
+        f"TEXTO A RESUMIR:\n{text}{chunk_hint}"
     )
     return lmstudio_chat(
         app,
@@ -285,6 +321,52 @@ def process_job(app, job: Job):
                 db.session.commit()
                 return "success", f"Resumen listo: {title}", None
 
+            if job.type == "note_ai_chunk":
+                payload = job.payload or {}
+                user_id = payload.get("user_id")
+                subject_id = payload.get("subject_id")
+                note_id = payload.get("note_id")
+                filename = payload.get("filename") or "input.txt"
+                text = payload.get("text") or ""
+                model = payload.get("model") or app.config["LMSTUDIO_MODEL"]
+                chunk_index = max(0, int(payload.get("chunk_index") or 0))
+                total_chunks = max(1, int(payload.get("total_chunks") or 1))
+                exam_date_str = payload.get("exam_date") or "No indicada"
+
+                note = Note.query.filter_by(id=note_id, user_id=user_id).first()
+                subject_lookup_id = subject_id or (note.subject_id if note else None)
+                subject = Subject.query.filter_by(id=subject_lookup_id, user_id=user_id).first() if subject_lookup_id else None
+                if not note or not subject:
+                    return "error", None, "Apunte o asignatura inválidos."
+
+                exam_date_str = exam_date_str or (note.exam_date.isoformat() if note.exam_date else "No indicada")
+                summary = lmstudio_summarize_text(
+                    app,
+                    model,
+                    subject.name,
+                    note.title,
+                    exam_date_str,
+                    filename,
+                    text,
+                    chunk_index=chunk_index,
+                    total_chunks=total_chunks,
+                )
+                if not summary.strip():
+                    return "error", None, "El modelo devolvió un resumen vacío para el fragmento."
+
+                header = "\n\n"
+                if total_chunks and total_chunks > 1:
+                    header += f"### Fragmento {chunk_index + 1}/{total_chunks}\n"
+                note.content = (note.content or "").rstrip() + header + summary.strip()
+                note.ai_used = True
+                db.session.commit()
+
+                is_last = total_chunks and (chunk_index + 1) == total_chunks
+                msg = f"Fragmento {chunk_index + 1}/{total_chunks} añadido a {note.title}" if total_chunks > 1 else f"Resumen listo: {note.title}"
+                if is_last:
+                    msg = f"Resumen completo listo: {note.title}"
+                return "success", msg, None
+
             if job.type in ("flashcards_ai_new", "flashcards_ai_append"):
                 payload = job.payload or {}
                 user_id = payload.get("user_id")
@@ -373,7 +455,7 @@ def create_app():
                     with app.app_context():
                         job = (
                             Job.query.filter_by(status="pending")
-                            .order_by(Job.created_at.asc())
+                            .order_by(Job.created_at.asc(), Job.id.asc())
                             .first()
                         )
                         if not job:
@@ -718,7 +800,7 @@ def create_app():
                 return redirect(url_for("dashboard"))
 
             if not file_text:
-                flash("Para usar IA sube un TXT válido.", "error")
+                flash("Para usar IA sube un TXT o PDF válido.", "error")
                 return redirect(url_for("add_notes"))
 
             if title.strip():
@@ -729,22 +811,44 @@ def create_app():
                 exam_part = exam_date.isoformat() if exam_date else ""
                 final_title = f"{base_name} examen {exam_part} creado {created_str} ({selected_model})".strip()
             exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
-            job = Job(
+            chunks = chunk_text_with_overlap(file_text, max_tokens=6500, overlap=500)
+            if not chunks:
+                flash("No se pudo dividir el texto en fragmentos para IA.", "error")
+                return redirect(url_for("add_notes"))
+
+            note = Note(
                 user_id=current_user.id,
-                type="note_ai",
-                payload={
-                    "user_id": current_user.id,
-                    "subject_id": subject.id,
-                    "title": final_title,
-                    "exam_date": exam_date_str,
-                    "filename": filename or "input.txt",
-                    "text": file_text,
-                    "model": selected_model,
-                },
+                subject_id=subject.id,
+                title=final_title,
+                exam_date=exam_date,
+                original_filename=filename,
+                content=f"{final_title}\n\n",
+                ai_used=True,
             )
-            db.session.add(job)
+            db.session.add(note)
             db.session.commit()
-            flash("Resumen encolado ✅ Lo procesaremos en cuanto toque tu turno.", "success")
+
+            for idx, chunk in enumerate(chunks):
+                job = Job(
+                    user_id=current_user.id,
+                    type="note_ai_chunk",
+                    payload={
+                        "user_id": current_user.id,
+                        "subject_id": subject.id,
+                        "note_id": note.id,
+                        "title": final_title,
+                        "exam_date": exam_date_str,
+                        "filename": filename or "input.txt",
+                        "text": chunk,
+                        "model": selected_model,
+                        "chunk_index": idx,
+                        "total_chunks": len(chunks),
+                    },
+                )
+                db.session.add(job)
+            db.session.commit()
+
+            flash(f"Resumen encolado en {len(chunks)} fragmento(s) ✅ Se irá completando a medida que procesamos cada parte.", "success")
             return redirect(url_for("add_notes"))
 
         jobs = (

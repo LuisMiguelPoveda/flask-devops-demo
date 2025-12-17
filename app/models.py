@@ -95,7 +95,7 @@ class Job(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    type = db.Column(db.String(40), nullable=False)  # note_ai | flashcards_ai_new | flashcards_ai_append
+    type = db.Column(db.String(40), nullable=False)  # note_ai | note_ai_chunk | flashcards_ai_new | flashcards_ai_append
     status = db.Column(db.String(20), default="pending", nullable=False)  # pending | running | success | error
     payload = db.Column(db.JSON, nullable=False)
     result_message = db.Column(db.String(255), nullable=True)

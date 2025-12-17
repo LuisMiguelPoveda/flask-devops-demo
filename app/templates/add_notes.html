@@ -8,11 +8,13 @@
 
     <p>Opciones:</p>
     <ul>
-      <li><strong>IA (TXT):</strong> subes un .txt y se generan apuntes con el modelo.</li>
+      <li><strong>IA (TXT/PDF):</strong> subes un .txt o .pdf y se generan apuntes con el modelo.</li>
       <li><strong>Manual:</strong> escribes el contenido y se guarda tal cual (sin IA).</li>
     </ul>
 
-    <p><strong>Restricciones IA:</strong> solo .txt, máximo {{ max_kb }} KB, y se recorta a {{ max_chars }} caracteres.</p>
+    <div style="padding:10px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:10px; margin:10px 0;">
+      <strong>Límites:</strong> archivos hasta {{ max_kb }} KB (~{{ (max_kb/1024)|round(1) }} MB) y texto recortado a {{ max_chars }} caracteres para IA.
+    </div>
 
     <form method="post" enctype="multipart/form-data" id="notes-form">
       <div>
