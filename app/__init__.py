@@ -34,7 +34,7 @@ MAX_TEXT_CHARS = 300_000
 _worker_started = False
 
 
-def chunk_text_with_overlap(text: str, max_tokens: int = 6500, overlap: int = 500) -> list[str]:
+def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 500) -> list[str]:
     """
     Corta el texto en fragmentos aproximados de tokens (palabras) con solapamiento
     para minimizar la pérdida de contexto entre partes.
@@ -158,25 +158,22 @@ def lmstudio_chat(app, model: str, messages: list[dict], response_format: dict |
 
 def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date: str, filename: str, text: str, chunk_index: int | None = None, total_chunks: int | None = None) -> str:
     system_prompt = (
-        "Eres un profesor experto. Devuelve apuntes con la información clave en español, "
-        "en formato de viñetas (bullet points) y con estructura clara. "
-        "No inventes información. No incluyas introducción ni despedida."
+        "Eres un profesor experto. Devuelve solo el resumen, sin frases introductorias ni notas sobre tu respuesta. "
+        "Usa el idioma predominante del texto; si está en español o no hay predominio claro, responde en español. "
+        "Mantén un único idioma coherente en todo el resumen, en formato de viñetas claras y concisas. "
+        "No inventes información, no mezcles idiomas, no menciones fragmentos, cortes ni títulos añadidos, y no incluyas introducción ni despedida."
     )
-    chunk_suffix = ""
-    chunk_hint = ""
+    chunk_meta_line = ""
     if total_chunks and total_chunks > 1:
         human_idx = (chunk_index or 0) + 1
-        chunk_suffix = f" (fragmento {human_idx} de {total_chunks})"
-        chunk_hint = (
-            "\nEste texto es un fragmento de un archivo más largo que se está procesando por partes. "
-            "Resume solo este fragmento, pero conserva continuidad y contexto para poder unirlo con el resto."
-        )
+        chunk_meta_line = f"Parte: {human_idx}/{total_chunks} (solo para contexto; no lo menciones en tu respuesta)."
     user_prompt = (
         f"Asignatura: {subject}\n"
-        f"Título: {title}{chunk_suffix}\n"
+        f"Título: {title}\n"
         f"Fecha de examen: {exam_date}\n"
-        f"Archivo: {filename}\n\n"
-        f"TEXTO A RESUMIR:\n{text}{chunk_hint}"
+        f"Archivo: {filename}\n"
+        f"{chunk_meta_line}\n\n"
+        f"TEXTO A RESUMIR:\n{text}"
     )
     return lmstudio_chat(
         app,
@@ -354,15 +351,15 @@ def process_job(app, job: Job):
                 if not summary.strip():
                     return "error", None, "El modelo devolvió un resumen vacío para el fragmento."
 
-                header = "\n\n"
-                if total_chunks and total_chunks > 1:
-                    header += f"### Fragmento {chunk_index + 1}/{total_chunks}\n"
-                note.content = (note.content or "").rstrip() + header + summary.strip()
+                existing = (note.content or "").rstrip()
+                separator = "\n\n" if existing else ""
+                note.content = f"{existing}{separator}{summary.strip()}"
                 note.ai_used = True
                 db.session.commit()
 
                 is_last = total_chunks and (chunk_index + 1) == total_chunks
-                msg = f"Fragmento {chunk_index + 1}/{total_chunks} añadido a {note.title}" if total_chunks > 1 else f"Resumen listo: {note.title}"
+                progress = f" ({chunk_index + 1}/{total_chunks})" if total_chunks > 1 else ""
+                msg = f"Resumen en progreso{progress}: {note.title}"
                 if is_last:
                     msg = f"Resumen completo listo: {note.title}"
                 return "success", msg, None
@@ -811,7 +808,7 @@ def create_app():
                 exam_part = exam_date.isoformat() if exam_date else ""
                 final_title = f"{base_name} examen {exam_part} creado {created_str} ({selected_model})".strip()
             exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
-            chunks = chunk_text_with_overlap(file_text, max_tokens=6500, overlap=500)
+            chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
             if not chunks:
                 flash("No se pudo dividir el texto en fragmentos para IA.", "error")
                 return redirect(url_for("add_notes"))
