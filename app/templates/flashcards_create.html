@@ -28,7 +28,7 @@
           <input type="hidden" name="mode" value="ai" />
 
           <div style="padding:10px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:10px; margin-bottom:8px;">
-            <strong>Límites:</strong> puedes pedir entre 1 y 50 flashcards por generación; si el apunte es largo, las generamos por partes automáticamente.
+            <strong>Límites:</strong> cantidad solicitada se aplica a <em>cada</em> fragmento del apunte (ver abajo). Total máximo 50 tarjetas por generación.
           </div>
 
           <label>Deck destino (opcional)
@@ -52,22 +52,23 @@
             </select>
           </label>
 
-          <label>Cantidad de flashcards
+          <label>Cantidad de flashcards <small>(por fragmento)</small>
             <input type="number" name="count" value="5" min="1" max="50" required />
           </label>
 
           
-          <p class="subtle">Puedes generar entre 1 y 50 flashcards en un solo paso.</p>
+          <p class="subtle">Se generarán esta cantidad por cada fragmento del apunte seleccionado (máx total 50 tarjetas).</p>
 <label>Apunte / resumen
             <select name="note_id" required>
               <option value="">(elige uno)</option>
               {% for n in notes %}
                 <option value="{{ n.id }}">
-                  {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %}
+                  {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %} — {{ note_chunk_counts.get(n.id, 1) }} fragmentos
                 </option>
               {% endfor %}
             </select>
           </label>
+          <p class="subtle">El número de fragmentos se calcula con los mismos límites que el resumen IA (3.000 tokens con 500 de solape).</p>
 
           <ul class="nav-list" data-nav>
             <li><button class="nav-option btn-primary" type="submit" id="ai-create-btn">Generar con IA</button></li>

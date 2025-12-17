@@ -41,7 +41,15 @@
           <p>
             <strong>Asignatura:</strong> {{ n.subject.name }} |
             <strong>Fecha de examen:</strong> {{ n.exam_date if n.exam_date else "—" }} |
-            <strong>Modo:</strong> {{ "IA" if n.ai_used else "Manual" }} |
+            <strong>Modelo:</strong>
+            {% if n.ai_used %}
+              {{ note_models.get(n.id, "—") }}
+            {% else %}
+              Manual
+            {% endif %}
+            {% if n.ai_used and chunk_totals.get(n.id) %}
+              | <strong>Fragmentos IA:</strong> {{ chunk_totals.get(n.id) }}
+            {% endif %} |
             <strong>Creado:</strong> {{ n.created_at.strftime("%Y-%m-%d") if n.created_at else "—" }}
           </p>
 

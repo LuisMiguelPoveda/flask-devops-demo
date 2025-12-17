@@ -59,6 +59,49 @@ def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 50
     return chunks
 
 
+def build_note_chunks_map(user_id: int, notes: list[Note], max_tokens: int = 3000, overlap: int = 500) -> dict[int, dict]:
+    """
+    Devuelve un dict {note_id: {"chunks": [str], "total": int}}.
+    Usa los trabajos note_ai_chunk si existen para respetar el número de fragmentos originales;
+    si no hay trabajos, divide el contenido del apunte.
+    """
+    if not notes:
+        return {}
+
+    note_ids = {n.id for n in notes if n.id}
+    jobs = Job.query.filter(Job.user_id == user_id, Job.type == "note_ai_chunk").all()
+    by_note: dict[int, list[tuple[int, str, int]]] = {}
+    for job in jobs:
+        payload = job.payload or {}
+        note_id = payload.get("note_id")
+        if note_id not in note_ids:
+            continue
+        try:
+            idx = max(0, int(payload.get("chunk_index") or 0))
+        except (ValueError, TypeError):
+            idx = 0
+        try:
+            total = max(1, int(payload.get("total_chunks") or 1))
+        except (ValueError, TypeError):
+            total = 1
+        text = payload.get("text") or ""
+        by_note.setdefault(note_id, []).append((idx, text, total))
+
+    result: dict[int, dict] = {}
+    for note in notes:
+        if note.id in by_note:
+            chunks_info = sorted(by_note[note.id], key=lambda t: t[0])
+            chunks = [t[1] for t in chunks_info if t[1]]
+            total_max = max((t[2] for t in chunks_info if t[2]), default=len(chunks))
+            result[note.id] = {"chunks": chunks, "total": total_max or len(chunks) or 1}
+            continue
+
+        chunks = chunk_text_with_overlap(note.content or "", max_tokens=max_tokens, overlap=overlap)
+        result[note.id] = {"chunks": chunks or [note.content or ""], "total": len(chunks) or 1}
+
+    return result
+
+
 def simple_format_note(text: str) -> Markup:
     """
     Convierte texto plano con encabezados '#' y viñetas '*'/'-' en HTML simple.
@@ -216,7 +259,7 @@ def _parse_and_validate_flashcards_json(raw: str, expected_count: int) -> list[d
     return data
 
 
-def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5) -> list[dict]:
+def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5, source_text: str | None = None) -> list[dict]:
     """
     Genera N flashcards a partir del contenido del apunte/resumen.
     Devuelve lista de dicts validada.
@@ -232,12 +275,14 @@ def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5) ->
         "]"
     )
 
+    text = source_text if source_text is not None else (note.content or "")
     user_prompt = (
         f"Asignatura: {note.subject.name}\n"
         f"Título: {note.title}\n"
         f"Fecha de examen: {note.exam_date.isoformat() if note.exam_date else 'No indicada'}\n\n"
-        f"TEXTO:\n{note.content}\n\n"
-        "Crea preguntas potenciales de examen, 4 opciones, solo 1 correcta."
+        f"TEXTO:\n{text}\n\n"
+        "Crea preguntas potenciales de examen, 4 opciones, solo 1 correcta. "
+        "No menciones que es un fragmento ni añadas contexto externo."
     )
 
     schema = {
@@ -399,6 +444,31 @@ def process_job(app, job: Job):
                 db.session.add(deck)
                 db.session.commit()
                 return "success", f"Deck creado: {deck.title}", None
+
+            if job.type == "flashcards_ai_chunk":
+                payload = job.payload or {}
+                user_id = payload.get("user_id")
+                note_id = payload.get("note_id")
+                deck_id = payload.get("deck_id")
+                model = payload.get("model") or app.config["LMSTUDIO_MODEL"]
+                count = max(1, min(int(payload.get("count") or 5), 50))
+                chunk_index = max(0, int(payload.get("chunk_index") or 0))
+                total_chunks = max(1, int(payload.get("total_chunks") or 1))
+                chunk_text = payload.get("text") or ""
+
+                note = Note.query.filter_by(id=note_id, user_id=user_id).first()
+                deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=user_id).first()
+                if not note or not deck:
+                    return "error", None, "Apunte o deck inválido."
+
+                cards = lmstudio_generate_flashcards(app, model, note, count=count, source_text=chunk_text)
+                deck.flashcards = (deck.flashcards or []) + cards
+                db.session.commit()
+
+                msg = f"Flashcards añadidas (fragmento {chunk_index + 1}/{total_chunks}) a {deck.title}"
+                if (chunk_index + 1) == total_chunks:
+                    msg = f"Flashcards listas para {deck.title}"
+                return "success", msg, None
 
             return "error", None, "Tipo de trabajo desconocido."
         except Timeout:
@@ -887,7 +957,38 @@ def create_app():
             q = q.filter(Note.title.ilike(f"%{title_q}%"))
 
         notes = q.order_by(Note.updated_at.desc()).all()
-        return render_template("notes_list.html", subjects=subjects, notes=notes, filters={"subject_id": subject_id or "", "exam_date": exam_date_str, "title": title_q})
+        chunk_totals: dict[int, int] = {}
+        note_models: dict[int, str] = {}
+        if notes:
+            note_ids = {n.id for n in notes}
+            jobs = Job.query.filter(
+                Job.user_id == current_user.id,
+                Job.type == "note_ai_chunk",
+            ).all()
+            for job in jobs:
+                payload = job.payload or {}
+                note_id = payload.get("note_id")
+                if note_id not in note_ids:
+                    continue
+                try:
+                    total_chunks = int(payload.get("total_chunks") or 0)
+                except (ValueError, TypeError):
+                    total_chunks = 0
+                if total_chunks:
+                    prev = chunk_totals.get(note_id, 0)
+                    chunk_totals[note_id] = max(prev, total_chunks)
+                model = payload.get("model")
+                if model:
+                    note_models.setdefault(note_id, model)
+
+        return render_template(
+            "notes_list.html",
+            subjects=subjects,
+            notes=notes,
+            filters={"subject_id": subject_id or "", "exam_date": exam_date_str, "title": title_q},
+            chunk_totals=chunk_totals,
+            note_models=note_models,
+        )
 
     @app.route("/notes/merge", methods=["POST"])
     @login_required
@@ -984,6 +1085,7 @@ def create_app():
         )
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
+        note_chunk_map = build_note_chunks_map(current_user.id, notes, max_tokens=3000, overlap=500)
 
         if request.method == "POST":
             mode = (request.form.get("mode") or "ai").strip()
@@ -1008,24 +1110,50 @@ def create_app():
                     flash("Resumen/apunte inválido.", "error")
                     return redirect(url_for("flashcards_create"))
 
-                job_type = "flashcards_ai_append" if target_deck else "flashcards_ai_new"
                 custom_title = (request.form.get("ai_deck_title") or "").strip()
-                count = request.form.get("count", type=int) or 5
-                job = Job(
-                    user_id=current_user.id,
-                    type=job_type,
-                    payload={
-                        "user_id": current_user.id,
-                        "note_id": note.id,
-                        "deck_id": target_deck.id if target_deck else None,
-                        "model": selected_model,
-                        "ai_deck_title": custom_title,
-                        "count": count,
-                    },
-                )
-                db.session.add(job)
+                count_per_chunk = max(1, min(request.form.get("count", type=int) or 5, 50))
+
+                chunk_entry = note_chunk_map.get(note.id) or {"chunks": [note.content or ""], "total": 1}
+                chunks = chunk_entry.get("chunks") or [note.content or ""]
+                chunk_count = len(chunks)
+                max_chunks_allowed = max(1, 50 // count_per_chunk) if count_per_chunk else 1
+                if chunk_count > max_chunks_allowed:
+                    chunks = chunks[:max_chunks_allowed]
+                    chunk_count = len(chunks)
+
+                if target_deck:
+                    deck = target_deck
+                else:
+                    deck = FlashcardDeck(
+                        user_id=current_user.id,
+                        subject_id=note.subject_id,
+                        title=custom_title or note.title,
+                        exam_date=note.exam_date,
+                        source_note_id=note.id,
+                        flashcards=[],
+                    )
+                    db.session.add(deck)
+                    db.session.commit()
+
+                for idx, chunk in enumerate(chunks):
+                    job = Job(
+                        user_id=current_user.id,
+                        type="flashcards_ai_chunk",
+                        payload={
+                            "user_id": current_user.id,
+                            "note_id": note.id,
+                            "deck_id": deck.id,
+                            "model": selected_model,
+                            "count": count_per_chunk,
+                            "chunk_index": idx,
+                            "total_chunks": chunk_count,
+                            "text": chunk,
+                        },
+                    )
+                    db.session.add(job)
                 db.session.commit()
-                flash("Generación de flashcards encolada ✅", "success")
+                total_cards = min(50, count_per_chunk * chunk_count)
+                flash(f"Generación encolada ✅ {chunk_count} fragmentos × {count_per_chunk} (máx 50, total estimado {total_cards}).", "success")
                 return redirect(url_for("flashcards_create"))
 
             # ---- MANUAL ----
@@ -1115,6 +1243,7 @@ def create_app():
             "flashcards_create.html",
             subjects=subjects,
             notes=notes,
+            note_chunk_counts={nid: info.get("total", 1) for nid, info in note_chunk_map.items()},
             models=available_models,
             selected_model=selected_model,
             decks=decks,
@@ -1166,6 +1295,7 @@ def create_app():
         )
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
+        note_chunk_map = build_note_chunks_map(current_user.id, notes, max_tokens=3000, overlap=500)
 
         if request.method == "POST":
             mode = (request.form.get("mode") or "manual").strip()
@@ -1182,19 +1312,34 @@ def create_app():
                     flash("Resumen/apunte inválido.", "error")
                     return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
-                job = Job(
-                    user_id=current_user.id,
-                    type="flashcards_ai_append",
-                    payload={
-                        "user_id": current_user.id,
-                        "note_id": note.id,
-                        "deck_id": deck.id,
-                        "model": model,
-                    },
-                )
-                db.session.add(job)
+                count_per_chunk = 5  # fijo en UI actual
+                chunk_entry = note_chunk_map.get(note.id) or {"chunks": [note.content or ""], "total": 1}
+                chunks = chunk_entry.get("chunks") or [note.content or ""]
+                chunk_count = len(chunks)
+                max_chunks_allowed = max(1, 50 // count_per_chunk)
+                if chunk_count > max_chunks_allowed:
+                    chunks = chunks[:max_chunks_allowed]
+                    chunk_count = len(chunks)
+
+                for idx, chunk in enumerate(chunks):
+                    job = Job(
+                        user_id=current_user.id,
+                        type="flashcards_ai_chunk",
+                        payload={
+                            "user_id": current_user.id,
+                            "note_id": note.id,
+                            "deck_id": deck.id,
+                            "model": model,
+                            "count": count_per_chunk,
+                            "chunk_index": idx,
+                            "total_chunks": chunk_count,
+                            "text": chunk,
+                        },
+                    )
+                    db.session.add(job)
                 db.session.commit()
-                flash("Generación de flashcards encolada ✅", "success")
+                total_cards = min(50, count_per_chunk * chunk_count)
+                flash(f"Generación de flashcards encolada ✅ {chunk_count} fragmentos × {count_per_chunk} (máx 50, total estimado {total_cards}).", "success")
                 return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
             if mode == "merge":
@@ -1279,6 +1424,7 @@ def create_app():
             deck=deck,
             subjects=subjects,
             notes=notes,
+            note_chunk_counts={nid: info.get("total", 1) for nid, info in note_chunk_map.items()},
             other_decks=other_decks,
             models=available_models,
             selected_model=selected_model,

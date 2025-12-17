@@ -13,7 +13,7 @@
     </ul>
 
     <div style="padding:10px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:10px; margin:10px 0;">
-      <strong>Límites:</strong> archivos hasta {{ max_kb }} KB (~{{ (max_kb/1024)|round(1) }} MB) y texto recortado a {{ max_chars }} caracteres para IA.
+      <strong>Límites:</strong> archivos hasta {{ max_kb }} KB (~{{ (max_kb/1024)|round(1) }} MB), texto recortado a {{ max_chars }} caracteres para IA, procesado en fragmentos de ~3.000 tokens con 500 de solape.
     </div>
 
     <form method="post" enctype="multipart/form-data" id="notes-form">

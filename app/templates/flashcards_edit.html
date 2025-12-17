@@ -12,7 +12,7 @@
 
   <div class="card" style="margin-bottom:16px;">
     <h3>Añadir 5 flashcards con IA</h3>
-    <p>Selecciona un apunte/resumen para generar y anexar nuevas tarjetas a este deck.</p>
+    <p>Selecciona un apunte/resumen; se generarán 5 tarjetas por fragmento del apunte (máx total 50).</p>
 
     <form method="post" class="stack" id="ai-append-form">
       <input type="hidden" name="mode" value="append_ai" />
@@ -29,7 +29,7 @@
         <option value="">(elige uno)</option>
         {% for n in notes %}
           <option value="{{ n.id }}">
-            {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %}
+            {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %} — {{ note_chunk_counts.get(n.id, 1) }} fragmentos
           </option>
         {% endfor %}
       </select>
