@@ -41,7 +41,7 @@
 
     {% if messages %}
       <div class="chat">
-        {% for msg in messages %}
+        {% for msg in messages|reverse %}
           <div class="chat-message {{ msg.role }}">
             <strong>{% if msg.role == 'user' %}Tú{% else %}Profe{% endif %}:</strong>
             <p>{{ msg.content }}</p>
@@ -55,12 +55,22 @@
     const form = document.getElementById("ask-form");
     const loading = document.getElementById("loading-indicator");
     const submitBtn = document.getElementById("submit-btn");
+    const question = document.getElementById("question");
 
     if (form && loading && submitBtn) {
       form.addEventListener("submit", function () {
         loading.style.display = "block";
         submitBtn.disabled = true;
         submitBtn.textContent = "Enviando...";
+      });
+    }
+
+    if (question && form) {
+      question.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
       });
     }
   </script>

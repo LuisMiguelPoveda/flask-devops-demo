@@ -36,6 +36,10 @@
             </select>
           </label>
 
+          <label>Nombre del nuevo deck (opcional)
+            <input name="ai_deck_title" placeholder="Ej: Flashcards IA — Tema 3" />
+          </label>
+
           <label>Modelo
             <select name="model">
               {% for m in models %}
@@ -102,9 +106,9 @@
             </div>
 
             <div>
-              <label for="exam_date">Fecha de examen</label>
-              <input id="exam_date" name="exam_date" type="date" />
-            </div>
+          <label for="exam_date">Fecha de examen</label>
+          <input id="exam_date" name="exam_date" type="date" />
+        </div>
           </div>
 
           <hr />

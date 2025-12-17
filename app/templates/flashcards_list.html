@@ -23,7 +23,7 @@
         </div>
 
         <div>
-          <label for="exam_date">Fecha examen</label>
+          <label for="exam_date">Fecha de examen</label>
           <input id="exam_date" name="exam_date" type="date" value="{{ filters.exam_date }}" />
         </div>
 
@@ -50,7 +50,7 @@
               <h3 style="margin:0;">{{ d.title }}</h3>
               <p style="margin:4px 0 0 0;">
                 <strong>Asignatura:</strong> {{ d.subject.name }} |
-                <strong>Fecha:</strong> {{ d.exam_date if d.exam_date else "—" }} |
+                <strong>Fecha de examen:</strong> {{ d.exam_date if d.exam_date else "—" }} |
                 <strong>Flashcards:</strong> {{ d.flashcards|length }}
               </p>
             </div>

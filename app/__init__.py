@@ -307,7 +307,7 @@ def create_app():
     def ask_profe():
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
-        messages = []
+        messages = session.get("ask_profe_history", []) or []
 
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
@@ -315,6 +315,13 @@ def create_app():
 
             if question:
                 try:
+                    # Limitar historial para evitar sesiones enormes
+                    if not isinstance(messages, list):
+                        messages = []
+                    messages = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")]
+                    history = messages[-12:]  # ultimos turnos
+                    history.append({"role": "user", "content": question})
+
                     payload = {
                         "model": selected_model,
                         "messages": [
@@ -325,7 +332,7 @@ def create_app():
                                     "sin usar asteriscos ni acciones roleplay; escribe como hablarías en la vida real."
                                 ),
                             },
-                            {"role": "user", "content": question},
+                            *history,
                         ],
                         "temperature": 0.7,
                     }
@@ -334,7 +341,9 @@ def create_app():
                     resp.raise_for_status()
                     data = resp.json()
                     answer = data["choices"][0]["message"]["content"]
-                    messages = [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+                    history.append({"role": "assistant", "content": answer})
+                    session["ask_profe_history"] = history[-12:]
+                    messages = history
                 except Timeout:
                     flash("El modelo tardó demasiado en responder.", "error")
                     return redirect(url_for("dashboard"))
@@ -624,10 +633,11 @@ def create_app():
                     flash(f"{len(cards)} flashcards añadidas al deck existente ✅", "success")
                     return redirect(url_for("flashcards_list"))
                 else:
+                    custom_title = (request.form.get("ai_deck_title") or "").strip()
                     deck = FlashcardDeck(
                         user_id=current_user.id,
                         subject_id=note.subject_id,
-                        title=note.title,
+                        title=custom_title or note.title,
                         exam_date=note.exam_date,
                         source_note_id=note.id,
                         flashcards=cards,

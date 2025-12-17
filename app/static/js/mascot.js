@@ -83,7 +83,7 @@
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       hideTip();
-      scheduleTip(90000);
+      scheduleTip(180000);
     }, duration);
   }
 
