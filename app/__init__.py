@@ -186,6 +186,7 @@ def create_app():
 
     @app.context_processor
     def inject_login_flag():
+        # Flags to trigger mascot celebration on first render after login/register.
         just_logged_in = session.pop("just_logged_in", None)
         just_registered = session.pop("just_registered", None)
         return {"just_logged_in": bool(just_logged_in), "just_registered": bool(just_registered)}
@@ -307,6 +308,7 @@ def create_app():
     def ask_profe():
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
+        # Persist chat history in session to preserve context between questions.
         messages = session.get("ask_profe_history", []) or []
 
         if request.method == "POST":
@@ -315,7 +317,7 @@ def create_app():
 
             if question:
                 try:
-                    # Limitar historial para evitar sesiones enormes
+                    # Trim malformed entries and limit history to avoid oversized payloads.
                     if not isinstance(messages, list):
                         messages = []
                     messages = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")]
@@ -342,6 +344,7 @@ def create_app():
                     data = resp.json()
                     answer = data["choices"][0]["message"]["content"]
                     history.append({"role": "assistant", "content": answer})
+                    # Persist only the last 12 turns to balance context vs size.
                     session["ask_profe_history"] = history[-12:]
                     messages = history
                 except Timeout:

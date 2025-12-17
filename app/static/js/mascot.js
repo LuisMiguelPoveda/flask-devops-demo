@@ -39,6 +39,7 @@
           "Puedes editar un deck y añadir más tarjetas cuando quieras.",
         ];
 
+  // State/timers for idle loop, tooltips, and one-shot actions (celebrate/angry).
   let idleTimer = null;
   let tipTimer = null;
   let revertTimer = null;
