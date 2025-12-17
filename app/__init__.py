@@ -4,11 +4,13 @@ import time
 import threading
 from datetime import datetime
 from pathlib import Path
+from io import BytesIO
 
 import requests
 from requests.exceptions import Timeout, RequestException
 from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
+from PyPDF2 import PdfReader
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_login import (
@@ -23,7 +25,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .models import db, User, Subject, Note, FlashcardDeck, Job
 
 
-ALLOWED_EXTENSIONS = {"txt"}
+ALLOWED_EXTENSIONS = {"txt", "pdf"}
 MAX_UPLOAD_BYTES = 250 * 1024
 MAX_TEXT_CHARS = 30_000
 # evita arrancar dos workers en procesos reloader
@@ -33,8 +35,10 @@ _worker_started = False
 def simple_format_note(text: str) -> Markup:
     """
     Convierte texto plano con encabezados '#' y viñetas '*'/'-' en HTML simple.
-    Escapa contenido para evitar XSS.
+    Soporta **negrita** y *cursiva*. Escapa contenido para evitar XSS.
     """
+    import re
+
     lines = (text or "").splitlines()
     html_parts = []
     in_list = False
@@ -51,23 +55,32 @@ def simple_format_note(text: str) -> Markup:
             close_list()
             continue
 
-        if stripped.startswith("###"):
+        def fmt_inline(txt: str) -> str:
+            esc = escape(txt)
+            esc = re.sub(r"\*\*(.+?)\*\*", lambda m: f"<strong>{escape(m.group(1))}</strong>", esc)
+            esc = re.sub(r"\*(.+?)\*", lambda m: f"<em>{escape(m.group(1))}</em>", esc)
+            return esc
+
+        if stripped == "---":
             close_list()
-            html_parts.append(f"<h4>{escape(stripped.lstrip('#').strip())}</h4>")
+            html_parts.append("<hr />")
+        elif stripped.startswith("###"):
+            close_list()
+            html_parts.append(f"<h4>{fmt_inline(stripped.lstrip('#').strip())}</h4>")
         elif stripped.startswith("##"):
             close_list()
-            html_parts.append(f"<h3>{escape(stripped.lstrip('#').strip())}</h3>")
+            html_parts.append(f"<h3>{fmt_inline(stripped.lstrip('#').strip())}</h3>")
         elif stripped.startswith("#"):
             close_list()
-            html_parts.append(f"<h2>{escape(stripped.lstrip('#').strip())}</h2>")
+            html_parts.append(f"<h2>{fmt_inline(stripped.lstrip('#').strip())}</h2>")
         elif stripped.startswith(("* ", "- ")):
             if not in_list:
                 html_parts.append("<ul>")
                 in_list = True
-            html_parts.append(f"<li>{escape(stripped[2:].strip())}</li>")
+            html_parts.append(f"<li>{fmt_inline(stripped[2:].strip())}</li>")
         else:
             close_list()
-            html_parts.append(f"<p>{escape(stripped)}</p>")
+            html_parts.append(f"<p>{fmt_inline(stripped)}</p>")
 
     close_list()
     return Markup("".join(html_parts))
@@ -75,6 +88,20 @@ def simple_format_note(text: str) -> Markup:
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def extract_pdf_text(file_bytes: bytes) -> str:
+    """Extrae texto simple desde PDF usando PyPDF2."""
+    reader = PdfReader(BytesIO(file_bytes))
+    chunks: list[str] = []
+    for page in reader.pages:
+        try:
+            txt = page.extract_text() or ""
+        except Exception:
+            txt = ""
+        if txt:
+            chunks.append(txt)
+    return "\n".join(chunks)
 
 
 def fetch_models(app):
@@ -636,7 +663,7 @@ def create_app():
             file_text = ""
             if upload and upload.filename:
                 if not allowed_file(upload.filename):
-                    flash("Solo se permiten archivos .txt.", "error")
+                    flash("Solo se permiten archivos .txt o .pdf.", "error")
                     return redirect(url_for("add_notes"))
                 filename = secure_filename(upload.filename)
                 file_bytes = upload.read()
@@ -646,13 +673,17 @@ def create_app():
                 if len(file_bytes) > MAX_UPLOAD_BYTES:
                     flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
                     return redirect(url_for("add_notes"))
-                try:
-                    file_text = file_bytes.decode("utf-8")
-                except UnicodeDecodeError:
-                    file_text = file_bytes.decode("utf-8", errors="ignore")
-                file_text = file_text.strip()
+                ext = filename.rsplit(".", 1)[1].lower()
+                if ext == "pdf":
+                    file_text = extract_pdf_text(file_bytes)
+                else:
+                    try:
+                        file_text = file_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        file_text = file_bytes.decode("utf-8", errors="ignore")
+                file_text = (file_text or "").strip()
                 if not file_text:
-                    flash("El TXT no contiene texto legible.", "error")
+                    flash("El archivo no contiene texto legible.", "error")
                     return redirect(url_for("add_notes"))
                 if len(file_text) > MAX_TEXT_CHARS:
                     file_text = file_text[:MAX_TEXT_CHARS]
@@ -696,7 +727,7 @@ def create_app():
                 base_name = Path(filename or "input").stem
                 created_str = datetime.utcnow().date().isoformat()
                 exam_part = exam_date.isoformat() if exam_date else ""
-                final_title = f"{base_name} examen {exam_part} creado {created_str}".strip()
+                final_title = f"{base_name} examen {exam_part} creado {created_str} ({selected_model})".strip()
             exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
             job = Job(
                 user_id=current_user.id,

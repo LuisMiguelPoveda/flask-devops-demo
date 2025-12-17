@@ -3,3 +3,4 @@ gunicorn
 Flask-SQLAlchemy
 Flask-Login
 requests
+PyPDF2
