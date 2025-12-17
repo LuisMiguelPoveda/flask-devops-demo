@@ -84,3 +84,28 @@ class FlashcardDeck(db.Model):
     user = db.relationship("User", back_populates="flashcard_decks")
     subject = db.relationship("Subject", back_populates="flashcard_decks")
     source_note = db.relationship("Note", foreign_keys=[source_note_id])
+
+
+class Job(db.Model):
+    """
+    Cola simple para trabajos de IA (resúmenes y flashcards).
+    """
+
+    __tablename__ = "jobs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    type = db.Column(db.String(40), nullable=False)  # note_ai | flashcards_ai_new | flashcards_ai_append
+    status = db.Column(db.String(20), default="pending", nullable=False)  # pending | running | success | error
+    payload = db.Column(db.JSON, nullable=False)
+    result_message = db.Column(db.String(255), nullable=True)
+    error_message = db.Column(db.String(255), nullable=True)
+    notified = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User")
+
+    __table_args__ = (
+        db.Index("ix_jobs_status_created", "status", "created_at"),
+    )

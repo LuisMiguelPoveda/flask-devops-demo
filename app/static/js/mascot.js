@@ -54,17 +54,17 @@
   function hideTip() {
     if (hideTimer) clearTimeout(hideTimer);
     if (currentTip === "bubble" && bubble) {
-      bubble.classList.remove("is-visible");
+      bubble.classList.remove("is-visible", "is-success", "is-error");
       bubble.hidden = true;
     }
     if (currentTip === "card" && card) {
-      card.classList.remove("is-visible");
+      card.classList.remove("is-visible", "is-success", "is-error");
       card.hidden = true;
     }
     currentTip = null;
   }
 
-  function showTip({ variant, message, duration }) {
+  function showTip({ variant, message, duration, tone }) {
     if (currentTip) return;
     const text = message || pick(idleTips);
     if (variant === "card") {
@@ -72,12 +72,16 @@
       cardText.textContent = text;
       card.hidden = false;
       card.classList.add("is-visible");
+      if (tone === "success") card.classList.add("is-success");
+      if (tone === "error") card.classList.add("is-error");
       currentTip = "card";
     } else {
       if (!bubble) return;
       bubble.textContent = text;
       bubble.hidden = false;
       bubble.classList.add("is-visible");
+      if (tone === "success") bubble.classList.add("is-success");
+      if (tone === "error") bubble.classList.add("is-error");
       currentTip = "bubble";
     }
 
@@ -146,10 +150,32 @@
     }
   }
 
+  async function pollJobUpdates() {
+    try {
+      const resp = await fetch("/api/jobs/updates");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      (data.jobs || []).forEach((j) => {
+        hideTip();
+        const tone = j.status === "success" ? "success" : "error";
+        showTip({
+          variant: "card",
+          message: j.message || (j.status === "success" ? "Trabajo finalizado" : "Trabajo con error"),
+          duration: 12000,
+          tone,
+        });
+      });
+    } catch (e) {
+      // ignora errores de red
+    }
+  }
+
   // Start loops
   startIdleLoop();
   scheduleTip();
   detectLoginSuccess();
+  pollJobUpdates();
+  setInterval(pollJobUpdates, 8000);
 
   // Permitir que el usuario moleste a la mascota
   if (root && img) {

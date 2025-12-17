@@ -101,6 +101,21 @@
       </div>
     </form>
   </div>
+
+  {% if jobs %}
+    <div class="card" style="margin-top:12px;">
+      <h3>Tu cola de trabajos</h3>
+      <p class="subtle">Los más recientes primero.</p>
+      <ul style="padding-left:18px; margin:8px 0 0 0;">
+        {% for j in jobs %}
+          <li>
+            [{{ j.status }}] {{ j.type }} —
+            {% if j.result_message %}{{ j.result_message }}{% elif j.error_message %}{{ j.error_message }}{% else %}En espera{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
 </section>
 
 <script>

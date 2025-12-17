@@ -1,5 +1,7 @@
 import os
 import json
+import time
+import threading
 from datetime import datetime
 
 import requests
@@ -16,12 +18,14 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Note, FlashcardDeck
+from .models import db, User, Subject, Note, FlashcardDeck, Job
 
 
 ALLOWED_EXTENSIONS = {"txt"}
 MAX_UPLOAD_BYTES = 250 * 1024
 MAX_TEXT_CHARS = 30_000
+# evita arrancar dos workers en procesos reloader
+_worker_started = False
 
 
 def allowed_file(filename: str) -> bool:
@@ -164,6 +168,92 @@ def lmstudio_generate_flashcards(app, model: str, note: Note) -> list[dict]:
     return _parse_and_validate_flashcards_json(raw)
 
 
+def process_job(app, job: Job):
+    """
+    Ejecuta un trabajo de la cola. Devuelve (status, message, error_message).
+    """
+    with app.app_context():
+        try:
+            if job.type == "note_ai":
+                payload = job.payload or {}
+                user_id = payload.get("user_id")
+                subject_id = payload.get("subject_id")
+                title = payload.get("title")
+                exam_date_str = payload.get("exam_date")
+                filename = payload.get("filename") or "input.txt"
+                text = payload.get("text") or ""
+                model = payload.get("model") or app.config["LMSTUDIO_MODEL"]
+
+                subject = Subject.query.filter_by(id=subject_id, user_id=user_id).first()
+                user = User.query.get(user_id)
+                if not subject or not user:
+                    return "error", None, "Asignatura o usuario inválido."
+
+                content = lmstudio_summarize_text(app, model, subject.name, title, exam_date_str, filename, text)
+                if not content.strip():
+                    return "error", None, "El modelo devolvió un resumen vacío."
+
+                exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d").date() if exam_date_str and exam_date_str != "No indicada" else None
+                note = Note(
+                    user_id=user.id,
+                    subject_id=subject.id,
+                    title=title,
+                    exam_date=exam_date,
+                    original_filename=filename,
+                    content=content,
+                    ai_used=True,
+                )
+                db.session.add(note)
+                db.session.commit()
+                return "success", f"Resumen listo: {title}", None
+
+            if job.type in ("flashcards_ai_new", "flashcards_ai_append"):
+                payload = job.payload or {}
+                user_id = payload.get("user_id")
+                note_id = payload.get("note_id")
+                deck_id = payload.get("deck_id")
+                model = payload.get("model") or app.config["LMSTUDIO_MODEL"]
+                custom_title = (payload.get("ai_deck_title") or "").strip()
+
+                note = Note.query.filter_by(id=note_id, user_id=user_id).first()
+                if not note:
+                    return "error", None, "Apunte/resumen inválido."
+
+                cards = lmstudio_generate_flashcards(app, model, note)
+
+                if job.type == "flashcards_ai_append":
+                    deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=user_id).first()
+                    if not deck:
+                        return "error", None, "Deck inválido."
+                    deck.flashcards = (deck.flashcards or []) + cards
+                    db.session.commit()
+                    return "success", f"{len(cards)} flashcards añadidas a {deck.title}", None
+
+                # new deck
+                deck = FlashcardDeck(
+                    user_id=user_id,
+                    subject_id=note.subject_id,
+                    title=custom_title or note.title,
+                    exam_date=note.exam_date,
+                    source_note_id=note.id,
+                    flashcards=cards,
+                )
+                db.session.add(deck)
+                db.session.commit()
+                return "success", f"Deck creado: {deck.title}", None
+
+            return "error", None, "Tipo de trabajo desconocido."
+        except Timeout:
+            db.session.rollback()
+            return "error", None, "El modelo tardó demasiado en responder."
+        except RequestException:
+            db.session.rollback()
+            return "error", None, "No se pudo conectar con LM Studio."
+        except Exception as e:
+            db.session.rollback()
+            return "error", None, f"Error procesando el trabajo: {e}"
+
+
 def create_app():
     app = Flask(__name__)
 
@@ -197,6 +287,33 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        global _worker_started
+        if not _worker_started:
+            def worker_loop():
+                while True:
+                    with app.app_context():
+                        job = (
+                            Job.query.filter_by(status="pending")
+                            .order_by(Job.created_at.asc())
+                            .first()
+                        )
+                        if not job:
+                            time.sleep(2)
+                            continue
+                        job.status = "running"
+                        db.session.commit()
+
+                        status, msg, err = process_job(app, job)
+                        job.status = status
+                        job.result_message = msg
+                        job.error_message = err
+                        job.updated_at = datetime.utcnow()
+                        db.session.commit()
+                    # pequeña pausa para no saturar
+                    time.sleep(0.5)
+
+            threading.Thread(target=worker_loop, daemon=True).start()
+            _worker_started = True
 
     # ---------- AUTH ----------
     @app.route("/", methods=["GET", "POST"])
@@ -301,6 +418,57 @@ def create_app():
             .all()
         )
         return jsonify({"titles": [r[0] for r in rows if r[0]]})
+
+    @app.route("/api/jobs/queue")
+    @login_required
+    def api_jobs_queue():
+        jobs = (
+            Job.query.filter_by(user_id=current_user.id)
+            .order_by(Job.created_at.desc())
+            .limit(15)
+            .all()
+        )
+        return jsonify(
+            {
+                "jobs": [
+                    {
+                        "id": j.id,
+                        "type": j.type,
+                        "status": j.status,
+                        "result": j.result_message,
+                        "error": j.error_message,
+                        "created_at": j.created_at.isoformat(),
+                        "updated_at": j.updated_at.isoformat() if j.updated_at else None,
+                    }
+                    for j in jobs
+                ]
+            }
+        )
+
+    @app.route("/api/jobs/updates")
+    @login_required
+    def api_jobs_updates():
+        jobs = (
+            Job.query.filter(
+                Job.user_id == current_user.id,
+                Job.status.in_(("success", "error")),
+                Job.notified.is_(False),
+            )
+            .order_by(Job.updated_at.desc())
+            .all()
+        )
+        payload = [
+            {
+                "id": j.id,
+                "status": j.status,
+                "message": j.result_message or j.error_message or "",
+            }
+            for j in jobs
+        ]
+        for j in jobs:
+            j.notified = True
+        db.session.commit()
+        return jsonify({"jobs": payload})
 
     # ---------- Ask Profe ----------
     @app.route("/ask-profe", methods=["GET", "POST"])
@@ -457,36 +625,31 @@ def create_app():
             if len(text) > MAX_TEXT_CHARS:
                 text = text[:MAX_TEXT_CHARS]
 
-            try:
-                exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
-                content = lmstudio_summarize_text(app, selected_model, subject.name, title, exam_date_str, filename, text)
-            except Timeout:
-                flash("El modelo tardó demasiado en responder.", "error")
-                return redirect(url_for("dashboard"))
-            except RequestException:
-                flash("No he podido conectar con LM Studio. ¿Está encendido?", "error")
-                return redirect(url_for("dashboard"))
-            except Exception:
-                flash("Error inesperado generando el resumen.", "error")
-                return redirect(url_for("dashboard"))
-
-            if not content.strip():
-                flash("El modelo devolvió un resumen vacío.", "error")
-                return redirect(url_for("add_notes"))
-
-            note = Note(
+            exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
+            job = Job(
                 user_id=current_user.id,
-                subject_id=subject.id,
-                title=title,
-                exam_date=exam_date,
-                original_filename=filename,
-                content=content,
-                ai_used=True,
+                type="note_ai",
+                payload={
+                    "user_id": current_user.id,
+                    "subject_id": subject.id,
+                    "title": title,
+                    "exam_date": exam_date_str,
+                    "filename": filename,
+                    "text": text,
+                    "model": selected_model,
+                },
             )
-            db.session.add(note)
+            db.session.add(job)
             db.session.commit()
-            flash("Resumen guardado correctamente ✅", "success")
-            return redirect(url_for("dashboard"))
+            flash("Resumen encolado ✅ Lo procesaremos en cuanto toque tu turno.", "success")
+            return redirect(url_for("add_notes"))
+
+        jobs = (
+            Job.query.filter_by(user_id=current_user.id)
+            .order_by(Job.created_at.desc())
+            .limit(10)
+            .all()
+        )
 
         return render_template(
             "add_notes.html",
@@ -495,6 +658,7 @@ def create_app():
             selected_model=selected_model,
             max_kb=MAX_UPLOAD_BYTES // 1024,
             max_chars=MAX_TEXT_CHARS,
+            jobs=jobs,
         )
 
     # ---------- Consultar apuntes ----------
@@ -615,40 +779,23 @@ def create_app():
                     flash("Resumen/apunte inválido.", "error")
                     return redirect(url_for("flashcards_create"))
 
-                try:
-                    cards = lmstudio_generate_flashcards(app, selected_model, note)
-                except Timeout:
-                    flash("El modelo tardó demasiado en responder.", "error")
-                    return redirect(url_for("dashboard"))
-                except RequestException:
-                    flash("No he podido conectar con LM Studio. ¿Está encendido?", "error")
-                    return redirect(url_for("dashboard"))
-                except (ValueError, json.JSONDecodeError) as e:
-                    flash(f"La IA devolvió un JSON inválido: {e}", "error")
-                    return redirect(url_for("flashcards_create"))
-                except Exception:
-                    flash("Error inesperado generando flashcards.", "error")
-                    return redirect(url_for("flashcards_create"))
-
-                if target_deck:
-                    target_deck.flashcards = (target_deck.flashcards or []) + cards
-                    db.session.commit()
-                    flash(f"{len(cards)} flashcards añadidas al deck existente ✅", "success")
-                    return redirect(url_for("flashcards_list"))
-                else:
-                    custom_title = (request.form.get("ai_deck_title") or "").strip()
-                    deck = FlashcardDeck(
-                        user_id=current_user.id,
-                        subject_id=note.subject_id,
-                        title=custom_title or note.title,
-                        exam_date=note.exam_date,
-                        source_note_id=note.id,
-                        flashcards=cards,
-                    )
-                    db.session.add(deck)
-                    db.session.commit()
-                    flash("Flashcards generadas y guardadas ✅", "success")
-                    return redirect(url_for("flashcards_list"))
+                job_type = "flashcards_ai_append" if target_deck else "flashcards_ai_new"
+                custom_title = (request.form.get("ai_deck_title") or "").strip()
+                job = Job(
+                    user_id=current_user.id,
+                    type=job_type,
+                    payload={
+                        "user_id": current_user.id,
+                        "note_id": note.id,
+                        "deck_id": target_deck.id if target_deck else None,
+                        "model": selected_model,
+                        "ai_deck_title": custom_title,
+                    },
+                )
+                db.session.add(job)
+                db.session.commit()
+                flash("Generación de flashcards encolada ✅", "success")
+                return redirect(url_for("flashcards_create"))
 
             # ---- MANUAL ----
             deck_id = request.form.get("deck_id", type=int)
@@ -740,6 +887,7 @@ def create_app():
             models=available_models,
             selected_model=selected_model,
             decks=decks,
+            jobs=Job.query.filter_by(user_id=current_user.id).order_by(Job.created_at.desc()).limit(10).all(),
         )
 
     @app.route("/flashcards")
@@ -798,24 +946,19 @@ def create_app():
                     flash("Resumen/apunte inválido.", "error")
                     return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
-                try:
-                    new_cards = lmstudio_generate_flashcards(app, model, note)
-                except Timeout:
-                    flash("El modelo tardó demasiado en responder.", "error")
-                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
-                except RequestException:
-                    flash("No he podido conectar con LM Studio. ¿Está encendido?", "error")
-                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
-                except (ValueError, json.JSONDecodeError) as e:
-                    flash(f"La IA devolvió un JSON inválido: {e}", "error")
-                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
-                except Exception:
-                    flash("Error inesperado generando flashcards.", "error")
-                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
-
-                deck.flashcards = (deck.flashcards or []) + new_cards
+                job = Job(
+                    user_id=current_user.id,
+                    type="flashcards_ai_append",
+                    payload={
+                        "user_id": current_user.id,
+                        "note_id": note.id,
+                        "deck_id": deck.id,
+                        "model": model,
+                    },
+                )
+                db.session.add(job)
                 db.session.commit()
-                flash(f"{len(new_cards)} flashcards añadidas con IA ✅", "success")
+                flash("Generación de flashcards encolada ✅", "success")
                 return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
             subject_id = request.form.get("subject_id", type=int)
@@ -888,6 +1031,7 @@ def create_app():
             notes=notes,
             models=available_models,
             selected_model=selected_model,
+            jobs=Job.query.filter_by(user_id=current_user.id).order_by(Job.created_at.desc()).limit(10).all(),
         )
 
     @app.route("/flashcards/<int:deck_id>/delete", methods=["POST"])
