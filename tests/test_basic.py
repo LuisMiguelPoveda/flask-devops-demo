@@ -10,7 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from app import create_app
-from app.models import db, User, Subject, Note
+from app.models import db, User, Subject, Note, Job
 
 
 @pytest.fixture
@@ -56,6 +56,48 @@ def test_dashboard_after_login(authed_client):
     response = authed_client.get("/dashboard")
     assert response.status_code == 200
     assert b"Hola, ada" in response.data
+    assert b'href="/ask-profe"' in response.data
+
+
+def test_dashboard_disables_ask_profe_when_any_job_running(flask_app, authed_client):
+    with flask_app.app_context():
+        other = User(username="bob", password_hash="x")
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(
+            Job(
+                user_id=other.id,
+                type="note_ai",
+                status="running",
+                payload={"user_id": other.id},
+            )
+        )
+        db.session.commit()
+
+    response = authed_client.get("/dashboard")
+    assert response.status_code == 200
+    assert b"menu-btn--disabled" in response.data
+    assert b'href="/ask-profe"' not in response.data
+
+
+def test_ask_profe_redirects_when_busy(flask_app, authed_client):
+    with flask_app.app_context():
+        other = User(username="bob2", password_hash="x")
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(
+            Job(
+                user_id=other.id,
+                type="note_ai",
+                status="running",
+                payload={"user_id": other.id},
+            )
+        )
+        db.session.commit()
+
+    response = authed_client.get("/ask-profe")
+    assert response.status_code == 302
+    assert response.headers.get("Location", "").endswith("/dashboard")
 
 
 def test_add_notes_manual_flow_creates_note(flask_app, authed_client):

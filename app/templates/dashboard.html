@@ -14,11 +14,19 @@
 
     <div class="menu-wrap">
       <div class="menu-grid" data-nav>
-        <a class="menu-btn nav-option" href="{{ url_for('ask_profe') }}">
-          <div class="menu-icon">💬</div>
-          <div class="menu-title">Pregúntale al profe</div>
-          <div class="menu-desc">Chat con LM Studio.</div>
-        </a>
+        {% if profe_busy %}
+          <div class="menu-btn menu-btn--disabled" aria-disabled="true" title="Profe ocupado procesando trabajos">
+            <div class="menu-icon">💬</div>
+            <div class="menu-title">Pregúntale al profe</div>
+            <div class="menu-desc">No disponible: el profe está procesando trabajos ahora mismo.</div>
+          </div>
+        {% else %}
+          <a class="menu-btn nav-option" href="{{ url_for('ask_profe') }}">
+            <div class="menu-icon">💬</div>
+            <div class="menu-title">Pregúntale al profe</div>
+            <div class="menu-desc">Chat con LM Studio.</div>
+          </a>
+        {% endif %}
 
         <a class="menu-btn nav-option" href="{{ url_for('add_notes') }}">
           <div class="menu-icon">📝</div>

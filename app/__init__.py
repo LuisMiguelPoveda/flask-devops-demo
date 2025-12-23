@@ -502,12 +502,21 @@ def create_app():
     login_manager.login_view = "login"
     login_manager.init_app(app)
 
+    def profe_is_busy() -> bool:
+        return db.session.query(Job.id).filter(Job.status.in_(("pending", "running"))).first() is not None
+
     @app.context_processor
     def inject_login_flag():
         # Flags to trigger mascot celebration on first render after login/register.
         just_logged_in = session.pop("just_logged_in", None)
         just_registered = session.pop("just_registered", None)
         return {"just_logged_in": bool(just_logged_in), "just_registered": bool(just_registered)}
+
+    @app.context_processor
+    def inject_profe_busy_flag():
+        if not current_user.is_authenticated:
+            return {"profe_busy": False}
+        return {"profe_busy": profe_is_busy()}
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -706,6 +715,10 @@ def create_app():
     @app.route("/ask-profe", methods=["GET", "POST"])
     @login_required
     def ask_profe():
+        if profe_is_busy():
+            flash("El profe está ocupado procesando trabajos. Cuando termine, podrás usar «Pregúntale al profe».", "error")
+            return redirect(url_for("dashboard"))
+
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
         # Persist chat history in session to preserve context between questions.

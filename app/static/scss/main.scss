@@ -139,6 +139,42 @@ body {
   }
 }
 
+.menu-btn--disabled {
+  position: relative;
+  background: linear-gradient(135deg, rgba(254, 202, 202, 0.96), rgba(252, 165, 165, 0.96));
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #7f1d1d;
+  cursor: not-allowed;
+
+  .menu-desc {
+    color: rgba(127, 29, 29, 0.82);
+  }
+
+  &:hover,
+  &.is-selected {
+    transform: none;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    border-color: rgba(220, 38, 38, 0.6);
+    background: linear-gradient(135deg, rgba(252, 165, 165, 0.96), rgba(248, 113, 113, 0.96));
+    color: #7f1d1d;
+  }
+
+  &::after {
+    content: "OCUPADO";
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(220, 38, 38, 0.14);
+    border: 1px solid rgba(220, 38, 38, 0.35);
+    color: #991b1b;
+    font-weight: 800;
+  }
+}
+
 .menu-icon {
   font-size: 28px;
   margin-bottom: 8px;

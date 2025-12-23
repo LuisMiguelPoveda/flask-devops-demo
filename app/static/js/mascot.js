@@ -3,6 +3,7 @@
   if (!root) return;
   const justLoggedIn = (document.body.dataset.justLoggedIn || "") === "1";
   const justRegistered = (document.body.dataset.justRegistered || "") === "1";
+  const profeBusy = (document.body.dataset.profeBusy || "") === "1";
   const currentPage = document.body.dataset.page || "";
 
   const img = root.querySelector("[data-mascot-img]");
@@ -150,6 +151,23 @@
     }
   }
 
+  function scheduleProfeBusyNotice(triesLeft = 20, delay = 1200) {
+    if (!profeBusy || currentPage !== "dashboard") return;
+    if (triesLeft <= 0) return;
+    setTimeout(() => {
+      if (currentAction || currentTip) {
+        scheduleProfeBusyNotice(triesLeft - 1, 1500);
+        return;
+      }
+      showTip({
+        variant: "bubble",
+        message: "Ahora mismo el profe está ocupado procesando trabajos. Cuando termine, podrás usar «Pregúntale al profe».",
+        duration: 12000,
+        tone: "error",
+      });
+    }, delay);
+  }
+
   async function pollJobUpdates() {
     try {
       const resp = await fetch("/api/jobs/updates");
@@ -174,6 +192,7 @@
   startIdleLoop();
   scheduleTip();
   detectLoginSuccess();
+  scheduleProfeBusyNotice();
   pollJobUpdates();
   setInterval(pollJobUpdates, 8000);
 
