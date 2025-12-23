@@ -10,7 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from app import create_app
-from app.models import db, User, Subject, Note, Job
+from app.models import db, User, Subject, Note, Job, AskProfeMessage
 
 
 @pytest.fixture
@@ -98,6 +98,22 @@ def test_ask_profe_redirects_when_busy(flask_app, authed_client):
     response = authed_client.get("/ask-profe")
     assert response.status_code == 302
     assert response.headers.get("Location", "").endswith("/dashboard")
+
+
+def test_ask_profe_history_scoped_to_user(flask_app, authed_client):
+    with flask_app.app_context():
+        ada = User.query.filter_by(username="ada").first()
+        other = User(username="bob", password_hash="x")
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(AskProfeMessage(user_id=ada.id, role="user", content="Pregunta ada"))
+        db.session.add(AskProfeMessage(user_id=other.id, role="user", content="Pregunta bob"))
+        db.session.commit()
+
+    response = authed_client.get("/ask-profe")
+    assert response.status_code == 200
+    assert b"Pregunta ada" in response.data
+    assert b"Pregunta bob" not in response.data
 
 
 def test_add_notes_manual_flow_creates_note(flask_app, authed_client):

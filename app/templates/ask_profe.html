@@ -44,7 +44,11 @@
         {% for msg in messages|reverse %}
           <div class="chat-message {{ msg.role }}">
             <strong>{% if msg.role == 'user' %}Tú{% else %}Profe{% endif %}:</strong>
-            <p>{{ msg.content }}</p>
+            {% if msg.role == 'assistant' %}
+              <div class="chat-message__content">{{ msg.content | note_fmt }}</div>
+            {% else %}
+              <p>{{ msg.content }}</p>
+            {% endif %}
           </div>
         {% endfor %}
       </div>

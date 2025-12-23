@@ -15,6 +15,7 @@ class User(db.Model, UserMixin):
     subjects = db.relationship("Subject", back_populates="user", cascade="all, delete-orphan")
     notes = db.relationship("Note", back_populates="user", cascade="all, delete-orphan")
     flashcard_decks = db.relationship("FlashcardDeck", back_populates="user", cascade="all, delete-orphan")
+    ask_profe_messages = db.relationship("AskProfeMessage", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subject(db.Model):
@@ -108,4 +109,20 @@ class Job(db.Model):
 
     __table_args__ = (
         db.Index("ix_jobs_status_created", "status", "created_at"),
+    )
+
+
+class AskProfeMessage(db.Model):
+    __tablename__ = "ask_profe_messages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    role = db.Column(db.String(20), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="ask_profe_messages")
+
+    __table_args__ = (
+        db.Index("ix_ask_profe_user_created", "user_id", "created_at"),
     )

@@ -22,7 +22,7 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Note, FlashcardDeck, Job
+from .models import db, User, Subject, Note, FlashcardDeck, Job, AskProfeMessage
 
 
 ALLOWED_EXTENSIONS = {"txt", "pdf"}
@@ -154,6 +154,28 @@ def simple_format_note(text: str) -> Markup:
 
     close_list()
     return Markup("".join(html_parts))
+
+
+def fetch_ask_profe_history(user_id: int, limit: int = 12) -> list[dict]:
+    rows = (
+        AskProfeMessage.query.filter_by(user_id=user_id)
+        .order_by(AskProfeMessage.created_at.desc(), AskProfeMessage.id.desc())
+        .limit(limit)
+        .all()
+    )
+    rows.reverse()
+    return [{"role": row.role, "content": row.content} for row in rows]
+
+
+def prune_ask_profe_history(user_id: int, keep: int = 12) -> None:
+    extras = (
+        AskProfeMessage.query.filter_by(user_id=user_id)
+        .order_by(AskProfeMessage.created_at.desc(), AskProfeMessage.id.desc())
+        .offset(keep)
+        .all()
+    )
+    for msg in extras:
+        db.session.delete(msg)
 
 
 def allowed_file(filename: str) -> bool:
@@ -721,8 +743,7 @@ def create_app():
 
         available_models = fetch_models(app)
         selected_model = app.config["LMSTUDIO_MODEL"]
-        # Persist chat history in session to preserve context between questions.
-        messages = session.get("ask_profe_history", []) or []
+        messages = fetch_ask_profe_history(current_user.id)
 
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
@@ -730,11 +751,8 @@ def create_app():
 
             if question:
                 try:
-                    # Trim malformed entries and limit history to avoid oversized payloads.
-                    if not isinstance(messages, list):
-                        messages = []
-                    messages = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")]
-                    history = messages[-12:]  # ultimos turnos
+                    context_messages = messages[-2:]  # ultimo turno (usuario + profe)
+                    history = list(context_messages)
                     history.append({"role": "user", "content": question})
 
                     payload = {
@@ -757,9 +775,11 @@ def create_app():
                     data = resp.json()
                     answer = data["choices"][0]["message"]["content"]
                     history.append({"role": "assistant", "content": answer})
-                    # Persist only the last 12 turns to balance context vs size.
-                    session["ask_profe_history"] = history[-12:]
-                    messages = history
+                    db.session.add(AskProfeMessage(user_id=current_user.id, role="user", content=question))
+                    db.session.add(AskProfeMessage(user_id=current_user.id, role="assistant", content=answer))
+                    prune_ask_profe_history(current_user.id, keep=12)
+                    db.session.commit()
+                    messages = fetch_ask_profe_history(current_user.id)
                 except Timeout:
                     flash("El modelo tardó demasiado en responder.", "error")
                     return redirect(url_for("dashboard"))
@@ -767,6 +787,7 @@ def create_app():
                     flash("No he podido conectar con LM Studio. ¿Está encendido?", "error")
                     return redirect(url_for("dashboard"))
                 except Exception:
+                    db.session.rollback()
                     flash("Error inesperado procesando tu pregunta.", "error")
                     return redirect(url_for("dashboard"))
 
