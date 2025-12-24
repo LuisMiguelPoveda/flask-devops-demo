@@ -3,6 +3,8 @@ import json
 import time
 import threading
 import math
+import tempfile
+import fcntl
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from io import BytesIO
@@ -45,6 +47,7 @@ MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_TEXT_CHARS = 300_000
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
+_worker_lock_handle = None
 
 
 def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 500) -> list[str]:
@@ -634,38 +637,65 @@ def create_app():
     def load_user(user_id):
         return User.query.get(int(user_id))
 
+    def acquire_process_lock(name: str, blocking: bool = True):
+        lock_path = os.path.join(tempfile.gettempdir(), name)
+        lock_file = open(lock_path, "a+")
+        flags = fcntl.LOCK_EX
+        if not blocking:
+            flags |= fcntl.LOCK_NB
+        try:
+            fcntl.flock(lock_file.fileno(), flags)
+        except BlockingIOError:
+            lock_file.close()
+            return None
+        return lock_file
+
     with app.app_context():
-        db.create_all()
-        global _worker_started
+        db_lock = acquire_process_lock("flask-devops-demo-db-init.lock", blocking=True)
+        try:
+            db.create_all()
+        except Exception as exc:
+            message = str(exc).lower()
+            if "already exists" not in message:
+                raise
+        finally:
+            if db_lock:
+                fcntl.flock(db_lock.fileno(), fcntl.LOCK_UN)
+                db_lock.close()
+
+        global _worker_started, _worker_lock_handle
         if not _worker_started:
-            def worker_loop():
-                while True:
-                    with app.app_context():
-                        if get_active_profe_lock():
-                            time.sleep(2)
-                            continue
-                        job = (
-                            Job.query.filter_by(status="pending")
-                            .order_by(Job.created_at.asc(), Job.id.asc())
-                            .first()
-                        )
-                        if not job:
-                            time.sleep(2)
-                            continue
-                        job.status = "running"
-                        db.session.commit()
+            if _worker_lock_handle is None:
+                _worker_lock_handle = acquire_process_lock("flask-devops-demo-worker.lock", blocking=False)
+            if _worker_lock_handle:
+                def worker_loop():
+                    while True:
+                        with app.app_context():
+                            if get_active_profe_lock():
+                                time.sleep(2)
+                                continue
+                            job = (
+                                Job.query.filter_by(status="pending")
+                                .order_by(Job.created_at.asc(), Job.id.asc())
+                                .first()
+                            )
+                            if not job:
+                                time.sleep(2)
+                                continue
+                            job.status = "running"
+                            db.session.commit()
 
-                        status, msg, err = process_job(app, job)
-                        job.status = status
-                        job.result_message = msg
-                        job.error_message = err
-                        job.updated_at = datetime.utcnow()
-                        db.session.commit()
-                    # pequeña pausa para no saturar
-                    time.sleep(0.5)
+                            status, msg, err = process_job(app, job)
+                            job.status = status
+                            job.result_message = msg
+                            job.error_message = err
+                            job.updated_at = datetime.utcnow()
+                            db.session.commit()
+                        # pequeña pausa para no saturar
+                        time.sleep(0.5)
 
-            threading.Thread(target=worker_loop, daemon=True).start()
-            _worker_started = True
+                threading.Thread(target=worker_loop, daemon=True).start()
+                _worker_started = True
 
     # ---------- AUTH ----------
     @app.route("/", methods=["GET", "POST"])

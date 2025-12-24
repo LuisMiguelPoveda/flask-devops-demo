@@ -36,5 +36,5 @@ COPY --from=css-builder /app/app/static/css ./app/static/css
 
 EXPOSE 5000
 
-# Gunicorn con timeout largo para LM Studio
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "300", "app:create_app()"]
+# Gunicorn con timeout largo para LM Studio y más concurrencia
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "300", "--workers", "2", "--threads", "4", "app:create_app()"]

@@ -218,7 +218,7 @@
   function startJobPolling() {
     if (!jobTimer) {
       pollJobUpdates();
-      jobTimer = setInterval(pollJobUpdates, 8000);
+      jobTimer = setInterval(pollJobUpdates, 15000);
     }
   }
 
@@ -248,7 +248,7 @@
   function startProfeStatusPolling() {
     if (profeStatusTimer || currentPage !== "dashboard") return;
     pollProfeStatus();
-    profeStatusTimer = setInterval(pollProfeStatus, 4000);
+    profeStatusTimer = setInterval(pollProfeStatus, 10000);
   }
 
   function stopProfeStatusPolling() {
