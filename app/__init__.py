@@ -875,6 +875,104 @@ def create_app():
     def dashboard():
         return render_template("dashboard.html", username=current_user.username)
 
+    @app.route("/options")
+    @login_required
+    def options():
+        return render_template("options.html")
+
+    @app.route("/options/profile", methods=["GET", "POST"])
+    @login_required
+    def profile_edit():
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        if not profile:
+            return redirect(url_for("setup"))
+
+        student_name = profile.student_name or ""
+        student_age = str(profile.age or "")
+        personality_notes = profile.personality_notes or ""
+
+        if request.method == "POST":
+            student_name = (request.form.get("student_name") or "").strip()
+            student_age = (request.form.get("student_age") or "").strip()
+            personality_notes = (request.form.get("personality_notes") or "").strip()
+
+            errors: list[str] = []
+            if not student_name:
+                errors.append("Escribe el nombre del estudiante.")
+
+            age_val = None
+            try:
+                age_val = int(student_age)
+                if age_val < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append("Indica una edad válida.")
+
+            if not personality_notes:
+                errors.append("Añade detalles de personalidad para contextualizar al profe.")
+
+            if errors:
+                for err in errors:
+                    flash(err, "error")
+                return render_template(
+                    "setup.html",
+                    student_name=student_name,
+                    student_age=student_age,
+                    personality_notes=personality_notes,
+                    page_title="Perfil del estudiante",
+                    heading="Perfil del estudiante",
+                    subtext="Actualiza los datos del estudiante cuando lo necesites.",
+                    submit_label="Guardar cambios",
+                    back_url=url_for("options"),
+                )
+
+            profile.student_name = student_name
+            profile.age = age_val or 0
+            profile.personality_notes = personality_notes
+            db.session.commit()
+            flash("Perfil actualizado ✅", "success")
+            return redirect(url_for("options"))
+
+        return render_template(
+            "setup.html",
+            student_name=student_name,
+            student_age=student_age,
+            personality_notes=personality_notes,
+            page_title="Perfil del estudiante",
+            heading="Perfil del estudiante",
+            subtext="Actualiza los datos del estudiante cuando lo necesites.",
+            submit_label="Guardar cambios",
+            back_url=url_for("options"),
+        )
+
+    @app.route("/options/reset", methods=["POST"])
+    @login_required
+    def reset_account():
+        try:
+            note_ids = [row[0] for row in db.session.query(Note.id).filter_by(user_id=current_user.id).all()]
+            subject_ids = [row[0] for row in db.session.query(Subject.id).filter_by(user_id=current_user.id).all()]
+
+            AskProfeMessage.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+            Job.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+            FlashcardDeck.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+
+            if note_ids:
+                NoteSourceFile.query.filter(NoteSourceFile.note_id.in_(note_ids)).delete(synchronize_session=False)
+            Note.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+
+            if subject_ids:
+                SubjectExam.query.filter(SubjectExam.subject_id.in_(subject_ids)).delete(synchronize_session=False)
+            Subject.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+
+            StudentProfile.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+
+            db.session.commit()
+            flash("Cuenta reseteada ✅", "success")
+        except Exception:
+            db.session.rollback()
+            flash("Error reseteando la cuenta.", "error")
+        return redirect(url_for("setup"))
+
     # ---------- API: fechas por asignatura ----------
     @app.route("/api/exam-dates")
     @login_required

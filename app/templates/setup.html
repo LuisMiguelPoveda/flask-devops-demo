@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Configuración inicial{% endblock %}
+{% block title %}{{ page_title or "Configuración inicial" }}{% endblock %}
 
 {% block content %}
   <div class="card">
-    <h2>Datos del estudiante</h2>
-    <p>Completa el perfil para personalizar la experiencia del profe.</p>
+    <h2>{{ heading or "Datos del estudiante" }}</h2>
+    <p>{{ subtext or "Completa el perfil para personalizar la experiencia del profe." }}</p>
 
     <form method="post" id="setup-form">
       <div>
@@ -26,8 +26,13 @@
 
       <ul class="nav-list" data-nav style="margin-top:16px;">
         <li>
-          <button class="nav-option btn-primary" type="submit">Continuar</button>
+          <button class="nav-option btn-primary" type="submit">{{ submit_label or "Continuar" }}</button>
         </li>
+        {% if back_url %}
+          <li>
+            <a class="nav-option" href="{{ back_url }}">Volver</a>
+          </li>
+        {% endif %}
       </ul>
     </form>
   </div>

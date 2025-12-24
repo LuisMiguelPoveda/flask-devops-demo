@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Opciones{% endblock %}
+
+{% block content %}
+  <section class="shell shell--dashboard">
+    <header class="dash-hero">
+      <div>
+        <p class="eyebrow">Opciones</p>
+        <h1 class="headline" style="color:#fff;">Configuración de la cuenta</h1>
+        <p class="subtle">Gestiona el perfil del estudiante y tus asignaturas.</p>
+      </div>
+      <a class="link-pill" href="{{ url_for('dashboard') }}">Volver al menú</a>
+    </header>
+
+    <div class="menu-wrap">
+      <div class="menu-grid" data-nav>
+        <a class="menu-btn nav-option" href="{{ url_for('profile_edit') }}">
+          <div class="menu-icon">👤</div>
+          <div class="menu-title">Perfil del estudiante</div>
+          <div class="menu-desc">Editar nombre, edad y descripción.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('setup_subjects') }}">
+          <div class="menu-icon">📅</div>
+          <div class="menu-title">Añadir asignaturas y exámenes</div>
+          <div class="menu-desc">Organiza temas y fechas de examen.</div>
+        </a>
+
+        <form method="post" action="{{ url_for('reset_account') }}" style="margin:0;">
+          <button
+            class="menu-btn nav-option"
+            type="submit"
+            onclick="return confirm('Esto borrará apuntes, flashcards, asignaturas y tu perfil. ¿Seguro?');"
+          >
+            <div class="menu-icon">⚠️</div>
+            <div class="menu-title">Resetear cuenta</div>
+            <div class="menu-desc">Borra todos los datos y vuelve a la configuración inicial.</div>
+          </button>
+        </form>
+      </div>
+    </div>
+  </section>
+{% endblock %}
