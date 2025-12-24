@@ -150,6 +150,7 @@ class StudentProfile(db.Model):
     student_name = db.Column(db.String(120), nullable=False)
     age = db.Column(db.Integer, nullable=False)
     personality_notes = db.Column(db.Text, nullable=False)
+    default_model = db.Column(db.String(120), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

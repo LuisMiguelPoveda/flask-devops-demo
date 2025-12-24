@@ -190,6 +190,17 @@ def fetch_tema_options(user_id: int, subject_id: int | None = None) -> list[str]
     return [r[0] for r in rows if r[0]]
 
 
+def resolve_default_model(app, user_id: int | None, available_models: list[str] | None = None) -> str:
+    model = app.config["LMSTUDIO_MODEL"]
+    if user_id:
+        profile = StudentProfile.query.filter_by(user_id=user_id).first()
+        if profile and profile.default_model:
+            model = profile.default_model
+    if available_models and model not in available_models:
+        return available_models[0] if available_models else model
+    return model
+
+
 def is_setup_complete(user_id: int) -> bool:
     if not user_id:
         return False
@@ -313,7 +324,9 @@ def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5, so
         "["
         '{"question":"...","options":["A","B","C","D"],"correct_index":0},'
         "..."
-        "]"
+        "]. "
+        "Las preguntas deben ser autocontenidas: no uses referencias como "
+        "\"según el texto\", \"en el fragmento\", \"¿qué se mencionó?\" o similares."
     )
 
     text = source_text if source_text is not None else (note.content or "")
@@ -322,8 +335,9 @@ def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5, so
         f"Título: {note.title}\n"
         f"Fecha de examen: {note.exam_date.isoformat() if note.exam_date else 'No indicada'}\n\n"
         f"TEXTO:\n{text}\n\n"
-        "Crea preguntas potenciales de examen, 4 opciones, solo 1 correcta. "
-        "No menciones que es un fragmento ni añadas contexto externo."
+        "Crea preguntas potenciales de examen que se entiendan sin contexto adicional, "
+        "4 opciones, solo 1 correcta. No uses referencias al texto o a un fragmento, "
+        "y no añadas contexto externo."
     )
 
     schema = {
@@ -822,7 +836,7 @@ def create_app():
                 return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
             if not subjects_clean:
-                return redirect(url_for("setup_next"))
+                return redirect(url_for("setup_generate"))
 
             try:
                 for subj in subjects_clean:
@@ -847,13 +861,196 @@ def create_app():
                             )
                 db.session.commit()
                 flash("Asignaturas guardadas ✅", "success")
-                return redirect(url_for("setup_next"))
+                return redirect(url_for("setup_generate"))
             except Exception:
                 db.session.rollback()
                 flash("Error guardando las asignaturas.", "error")
                 return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
         return render_template("setup_subjects.html", subjects_seed=subjects_seed)
+
+    @app.route("/setup/generate", methods=["GET", "POST"])
+    @login_required
+    def setup_generate():
+        if not is_setup_complete(current_user.id):
+            return redirect(url_for("setup"))
+
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        available_models = fetch_models(app)
+        selected_model = resolve_default_model(app, current_user.id, available_models)
+
+        subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
+        subject_blocks: list[dict] = []
+        for subject in subjects:
+            exams = (
+                SubjectExam.query.filter_by(subject_id=subject.id)
+                .order_by(SubjectExam.exam_date.asc(), SubjectExam.tema.asc())
+                .all()
+            )
+            if exams:
+                subject_blocks.append({"subject": subject, "exams": exams})
+
+        if request.method == "POST":
+            selected_model = request.form.get("default_model") or selected_model
+            if available_models and selected_model not in available_models:
+                selected_model = available_models[0]
+            if profile:
+                profile.default_model = selected_model
+                db.session.commit()
+
+            total_files = 0
+            total_notes = 0
+            total_decks = 0
+            total_chunks = 0
+            errors: list[str] = []
+
+            try:
+                for block in subject_blocks:
+                    subject = block["subject"]
+                    for exam in block["exams"]:
+                        uploads = request.files.getlist(f"files_{exam.id}")
+                        for upload in uploads:
+                            if not upload or not upload.filename:
+                                continue
+                            total_files += 1
+                            if not allowed_file(upload.filename):
+                                errors.append(f"{upload.filename}: solo se permiten archivos .txt o .pdf.")
+                                continue
+
+                            filename = secure_filename(upload.filename)
+                            file_bytes = upload.read()
+                            if not file_bytes:
+                                errors.append(f"{filename}: el archivo está vacío.")
+                                continue
+                            if len(file_bytes) > MAX_UPLOAD_BYTES:
+                                errors.append(f"{filename}: archivo demasiado grande (máx {MAX_UPLOAD_BYTES // 1024} KB).")
+                                continue
+
+                            ext = filename.rsplit(".", 1)[1].lower()
+                            file_mime = upload.mimetype or ("application/pdf" if ext == "pdf" else "text/plain")
+                            if ext == "pdf":
+                                file_text = extract_pdf_text(file_bytes)
+                            else:
+                                try:
+                                    file_text = file_bytes.decode("utf-8")
+                                except UnicodeDecodeError:
+                                    file_text = file_bytes.decode("utf-8", errors="ignore")
+                            file_text = (file_text or "").strip()
+                            if not file_text:
+                                errors.append(f"{filename}: no contiene texto legible.")
+                                continue
+                            if len(file_text) > MAX_TEXT_CHARS:
+                                file_text = file_text[:MAX_TEXT_CHARS]
+
+                            chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
+                            if not chunks:
+                                errors.append(f"{filename}: no se pudo dividir el texto para IA.")
+                                continue
+
+                            exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
+                            base_name = Path(filename).stem if filename else subject.name
+                            title = f"{exam.tema} - {base_name}".strip(" -")
+                            if exam_date_str != "No indicada":
+                                title = f"{title} ({exam_date_str})"
+
+                            note = Note(
+                                user_id=current_user.id,
+                                subject_id=subject.id,
+                                title=title,
+                                exam_date=exam.exam_date,
+                                original_filename=filename,
+                                content=f"{title}\n\n",
+                                ai_used=True,
+                            )
+                            db.session.add(note)
+                            db.session.flush()
+                            db.session.add(
+                                NoteSourceFile(
+                                    note_id=note.id,
+                                    filename=filename or "input.txt",
+                                    content_type=file_mime or "application/octet-stream",
+                                    data=file_bytes,
+                                )
+                            )
+
+                            deck = FlashcardDeck(
+                                user_id=current_user.id,
+                                subject_id=subject.id,
+                                title=title,
+                                exam_date=exam.exam_date,
+                                source_note_id=note.id,
+                                flashcards=[],
+                            )
+                            db.session.add(deck)
+                            db.session.flush()
+
+                            for idx, chunk in enumerate(chunks):
+                                db.session.add(
+                                    Job(
+                                        user_id=current_user.id,
+                                        type="note_ai_chunk",
+                                        payload={
+                                            "user_id": current_user.id,
+                                            "subject_id": subject.id,
+                                            "note_id": note.id,
+                                            "title": title,
+                                            "exam_date": exam_date_str,
+                                            "filename": filename or "input.txt",
+                                            "text": chunk,
+                                            "model": selected_model,
+                                            "chunk_index": idx,
+                                            "total_chunks": len(chunks),
+                                        },
+                                    )
+                                )
+                                db.session.add(
+                                    Job(
+                                        user_id=current_user.id,
+                                        type="flashcards_ai_chunk",
+                                        payload={
+                                            "user_id": current_user.id,
+                                            "note_id": note.id,
+                                            "deck_id": deck.id,
+                                            "model": selected_model,
+                                            "count": 6,
+                                            "chunk_index": idx,
+                                            "total_chunks": len(chunks),
+                                            "text": chunk,
+                                        },
+                                    )
+                                )
+                            total_notes += 1
+                            total_decks += 1
+                            total_chunks += len(chunks)
+
+                if total_notes:
+                    db.session.commit()
+                    flash(
+                        f"Generación encolada ✅ {total_files} archivo(s), {total_notes} resumen(es), "
+                        f"{total_decks} deck(s), {total_chunks} fragmento(s).",
+                        "success",
+                    )
+                else:
+                    db.session.rollback()
+                    if total_files == 0:
+                        flash("No has subido archivos. Puedes hacerlo más tarde.", "success")
+            except Exception:
+                db.session.rollback()
+                flash("Error procesando la generación inicial.", "error")
+                return redirect(url_for("setup_generate"))
+
+            for err in errors:
+                flash(err, "error")
+            return redirect(url_for("setup_next"))
+
+        return render_template(
+            "setup_generate.html",
+            subjects=subject_blocks,
+            models=available_models,
+            selected_model=selected_model,
+            max_kb=MAX_UPLOAD_BYTES // 1024,
+            max_chars=MAX_TEXT_CHARS,
+        )
 
     @app.route("/setup/next")
     @login_required
@@ -1086,8 +1283,15 @@ def create_app():
             return redirect(url_for("dashboard"))
 
         available_models = fetch_models(app)
-        selected_model = app.config["LMSTUDIO_MODEL"]
+        selected_model = resolve_default_model(app, current_user.id, available_models)
         messages = fetch_ask_profe_history(current_user.id)
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        student_context = ""
+        if profile:
+            student_context = (
+                f"Estudiante: {profile.student_name} (edad {profile.age}). "
+                f"Características: {profile.personality_notes}"
+            )
 
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
@@ -1106,7 +1310,10 @@ def create_app():
                                 "role": "system",
                                 "content": (
                                     "Eres un profesor humano paciente y amable. Responde de forma clara, completa y conversacional, "
-                                    "sin usar asteriscos ni acciones roleplay; escribe como hablarías en la vida real."
+                                    "sin usar asteriscos ni acciones roleplay; escribe como hablarías en la vida real. "
+                                    "Adapta tu respuesta al perfil del estudiante, pero no menciones esos datos de forma explícita "
+                                    "a menos que sea relevante para la pregunta o el estudiante lo pida. "
+                                    f"{student_context}"
                                 ),
                             },
                             *history,
@@ -1143,7 +1350,7 @@ def create_app():
     def add_notes():
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
         available_models = fetch_models(app)
-        selected_model = app.config["LMSTUDIO_MODEL"]
+        selected_model = resolve_default_model(app, current_user.id, available_models)
 
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
@@ -1519,7 +1726,7 @@ def create_app():
             .all()
         )
         available_models = fetch_models(app)
-        selected_model = app.config["LMSTUDIO_MODEL"]
+        selected_model = resolve_default_model(app, current_user.id, available_models)
         note_chunk_map = build_note_chunks_map(current_user.id, notes, max_tokens=3000, overlap=500)
 
         if request.method == "POST":
@@ -1754,7 +1961,7 @@ def create_app():
             .all()
         )
         available_models = fetch_models(app)
-        selected_model = app.config["LMSTUDIO_MODEL"]
+        selected_model = resolve_default_model(app, current_user.id, available_models)
         note_chunk_map = build_note_chunks_map(current_user.id, notes, max_tokens=3000, overlap=500)
 
         if request.method == "POST":

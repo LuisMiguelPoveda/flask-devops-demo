@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Generación inicial{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2>Generación inicial de material</h2>
+    <p>Sube archivos para cada examen y generaremos resúmenes y flashcards automáticamente.</p>
+
+    <form method="post" enctype="multipart/form-data" id="setup-generate-form">
+      <div>
+        <label for="default_model">Elige el modelo de generación por defecto</label>
+        <select id="default_model" name="default_model">
+          {% for model in models %}
+            <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>{{ model }}</option>
+          {% endfor %}
+        </select>
+        <small>Se usará para esta generación y quedará como modelo por defecto.</small>
+      </div>
+
+      <div style="padding:10px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:10px; margin:10px 0;">
+        <strong>Límites:</strong> archivos hasta {{ max_kb }} KB (~{{ (max_kb/1024)|round(1) }} MB), texto recortado a {{ max_chars }} caracteres, 6 flashcards por fragmento.
+      </div>
+
+      {% if subjects|length == 0 %}
+        <p class="subtle">Aún no has añadido asignaturas y exámenes.</p>
+        <a class="nav-option" href="{{ url_for('setup_subjects') }}">Añadir asignaturas y exámenes</a>
+      {% else %}
+        {% for block in subjects %}
+          <div class="card" style="margin-top:12px;">
+            <h3 style="margin:0 0 8px 0;">{{ block.subject.name }}</h3>
+            {% for exam in block.exams %}
+              <div style="margin-bottom:12px;">
+                <strong>{{ exam.tema }}</strong>
+                <span class="subtle">({{ exam.exam_date }})</span>
+                <div style="margin-top:6px;">
+                  <label for="files_{{ exam.id }}">Archivos para este examen</label>
+                  <input
+                    id="files_{{ exam.id }}"
+                    name="files_{{ exam.id }}"
+                    type="file"
+                    multiple
+                    accept=".txt,text/plain,application/pdf"
+                  />
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <ul class="nav-list" data-nav style="margin-top:16px;">
+        <li>
+          <button class="nav-option btn-primary" type="submit">Generar material</button>
+        </li>
+        <li>
+          <a class="nav-option" href="{{ url_for('setup_next') }}">Omitir por ahora</a>
+        </li>
+      </ul>
+    </form>
+  </div>
+{% endblock %}
