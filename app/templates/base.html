@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}App{% endblock %}</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=8">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=10">
   </head>
 
   <body data-just-logged-in="{{ '1' if just_logged_in else '' }}" data-just-registered="{{ '1' if just_registered else '' }}" data-profe-busy="{{ '1' if profe_busy else '' }}" data-page="{{ request.endpoint or '' }}">

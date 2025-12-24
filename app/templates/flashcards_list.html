@@ -43,14 +43,26 @@
         border-color: rgba(220, 38, 38, 0.6);
         background: rgba(220, 38, 38, 0.12);
       }
+
+      .answer-toggle.is-active {
+        background: rgba(15, 23, 42, 0.92);
+        color: #fff;
+        border-color: rgba(15, 23, 42, 0.55);
+      }
     </style>
 
     <div class="card" style="margin-bottom:14px;">
       <div class="check-row" style="margin-bottom:12px;">
-        <input type="checkbox" id="flashcards-answer-toggle" />
-        <label for="flashcards-answer-toggle" style="margin:0;">
+        <button
+          type="button"
+          class="mascot-toggle answer-toggle"
+          data-answer-toggle
+          data-label-show="Mostrar respuestas correctas e incorrectas"
+          data-label-hide="Ocultar respuestas correctas e incorrectas"
+          aria-pressed="false"
+        >
           Mostrar respuestas correctas e incorrectas
-        </label>
+        </button>
       </div>
       <details {% if filters_active %}open{% endif %}>
         <summary>Filtros</summary>
@@ -105,36 +117,41 @@
                 <strong>Flashcards:</strong> {{ d.flashcards|length }}
               </p>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <a class="link-pill" href="{{ url_for('flashcards_edit', deck_id=d.id) }}">Editar</a>
-              <form method="post" action="{{ url_for('flashcards_delete', deck_id=d.id) }}">
-                <button type="submit" onclick="return confirm('¿Borrar este deck?');">Borrar</button>
-              </form>
-            </div>
           </div>
 
-          <details style="margin-top:10px;">
-            <summary>Ver flashcards</summary>
-            <div style="display:grid;gap:10px;margin-top:10px;">
-              {% for card in d.flashcards %}
-                <div class="card" data-flashcard-card style="padding:10px;background:rgba(0,0,0,0.06);">
-                  <strong>Q{{ loop.index }}.</strong> {{ card.question }}
-                  <ol style="margin:8px 0 0 16px;padding:0;">
-                    {% for opt in card.options %}
-                      <li
-                        class="flashcard-option"
-                        data-correct="{{ '1' if loop.index0 == card.correct_index else '0' }}"
-                        role="button"
-                        tabindex="0"
-                      >
-                        {{ opt }}
-                      </li>
-                    {% endfor %}
-                  </ol>
-                </div>
-              {% endfor %}
-            </div>
-          </details>
+          <div class="details-row">
+            <details>
+              <summary class="details-toggle">Ver flashcards</summary>
+              <div class="details-actions">
+                <a class="action-link" href="{{ url_for('flashcards_edit', deck_id=d.id) }}">Editar</a>
+              </div>
+              <div style="display:grid;gap:10px;margin-top:10px;">
+                {% for card in d.flashcards %}
+                  <div class="card" data-flashcard-card style="padding:10px;background:rgba(0,0,0,0.06);">
+                    <strong>Q{{ loop.index }}.</strong> {{ card.question }}
+                    <ol style="margin:8px 0 0 16px;padding:0;">
+                      {% for opt in card.options %}
+                        <li
+                          class="flashcard-option"
+                          data-correct="{{ '1' if loop.index0 == card.correct_index else '0' }}"
+                          role="button"
+                          tabindex="0"
+                        >
+                          {{ opt }}
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </div>
+                {% endfor %}
+              </div>
+            </details>
+
+            <form method="post" action="{{ url_for('flashcards_delete', deck_id=d.id) }}" class="details-row__action">
+              <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Borrar este deck?');">
+                Borrar
+              </button>
+            </form>
+          </div>
         </div>
       {% endfor %}
     {% endif %}
@@ -142,9 +159,23 @@
 
   <script>
     (function () {
-      const toggle = document.getElementById("flashcards-answer-toggle");
+      const toggle = document.querySelector("[data-answer-toggle]");
       const optionSelector = ".flashcard-option";
       if (!toggle) return;
+
+      function isToggleActive() {
+        return toggle.getAttribute("aria-pressed") === "true";
+      }
+
+      function syncToggle(active) {
+        const showLabel = toggle.dataset.labelShow || "Mostrar respuestas correctas e incorrectas";
+        const hideLabel = toggle.dataset.labelHide || "Ocultar respuestas correctas e incorrectas";
+        const label = active ? hideLabel : showLabel;
+        toggle.textContent = label;
+        toggle.setAttribute("aria-pressed", active ? "true" : "false");
+        toggle.classList.toggle("is-active", active);
+        toggle.title = label;
+      }
 
       function shuffleArray(items) {
         for (let i = items.length - 1; i > 0; i -= 1) {
@@ -179,7 +210,7 @@
       }
 
       function updateFromToggle() {
-        if (toggle.checked) {
+        if (isToggleActive()) {
           applyGlobalHighlights();
         } else {
           clearAllHighlights();
@@ -187,7 +218,7 @@
       }
 
       function handleOptionActivate(option) {
-        if (toggle.checked) return;
+        if (isToggleActive()) return;
         const card = option.closest("[data-flashcard-card]");
         if (!card) return;
         card.querySelectorAll(optionSelector).forEach((opt) => opt.classList.remove("is-correct", "is-wrong"));
@@ -195,7 +226,11 @@
         option.classList.add(isCorrect ? "is-correct" : "is-wrong");
       }
 
-      toggle.addEventListener("change", updateFromToggle);
+      toggle.addEventListener("click", () => {
+        syncToggle(!isToggleActive());
+        updateFromToggle();
+      });
+      syncToggle(false);
       updateFromToggle();
 
       options.forEach((opt) => {

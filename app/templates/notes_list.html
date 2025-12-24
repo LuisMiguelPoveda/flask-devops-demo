@@ -63,24 +63,26 @@
             <strong>Creado:</strong> {{ n.created_at.strftime("%Y-%m-%d") if n.created_at else "—" }}
           </p>
 
-          <details>
-            <summary>Ver contenido</summary>
-            <div style="margin-top:8px;">{{ n.content|note_fmt }}</div>
-          </details>
+          {% set source_file = source_files.get(n.id) %}
+          <div class="details-row">
+            <details>
+              <summary class="details-toggle">Ver contenido</summary>
+              <div style="margin-top:8px;">{{ n.content|note_fmt }}</div>
+              <div class="details-actions">
+                <a class="action-link" href="{{ url_for('note_edit', note_id=n.id) }}">Editar</a>
+              </div>
+              {% if n.ai_used and source_file %}
+                <div class="details-actions">
+                  <a
+                    href="{{ url_for('note_source_file', note_id=n.id) }}"
+                    class="action-link"
+                  >Descargar archivo original: {{ source_file.filename }}</a>
+                </div>
+              {% endif %}
+            </details>
 
-          <div style="margin-top: .75rem;">
-            <a href="{{ url_for('note_edit', note_id=n.id) }}">Editar</a>
-            {% set source_file = source_files.get(n.id) %}
-            {% if n.ai_used and source_file %}
-              <a
-                href="{{ url_for('note_source_file', note_id=n.id) }}"
-                class="nav-option"
-                style="display:inline-block; margin-left:8px;"
-              >Archivo original: {{ source_file.filename }}</a>
-            {% endif %}
-
-            <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" style="display:inline;">
-              <button type="submit" onclick="return confirm('¿Seguro que quieres borrar este apunte?');">
+            <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" class="details-row__action">
+              <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Seguro que quieres borrar este apunte?');">
                 Borrar
               </button>
             </form>
