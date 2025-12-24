@@ -53,6 +53,15 @@
   let profeNoticeTimer = null;
   let loginHandled = false;
   let isHidden = false;
+  let refreshQueued = false;
+
+  function scheduleRefresh(delay = 900) {
+    if (refreshQueued) return;
+    refreshQueued = true;
+    setTimeout(() => {
+      window.location.reload();
+    }, delay);
+  }
 
   function pick(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
@@ -203,7 +212,22 @@
     }, delay);
   }
 
-  function stopMascot() {
+  function startJobPolling() {
+    if (!jobTimer) {
+      pollJobUpdates();
+      jobTimer = setInterval(pollJobUpdates, 8000);
+    }
+  }
+
+  function stopJobPolling() {
+    if (jobTimer) {
+      clearInterval(jobTimer);
+      jobTimer = null;
+    }
+  }
+
+  function stopMascot(options = {}) {
+    const stopJobs = options.stopJobs !== false;
     if (idleTimer) {
       clearInterval(idleTimer);
       idleTimer = null;
@@ -220,9 +244,8 @@
       clearTimeout(revertTimer);
       revertTimer = null;
     }
-    if (jobTimer) {
-      clearInterval(jobTimer);
-      jobTimer = null;
+    if (stopJobs) {
+      stopJobPolling();
     }
     if (profeNoticeTimer) {
       clearTimeout(profeNoticeTimer);
@@ -240,10 +263,7 @@
       loginHandled = true;
     }
     scheduleProfeBusyNotice();
-    pollJobUpdates();
-    if (!jobTimer) {
-      jobTimer = setInterval(pollJobUpdates, 8000);
-    }
+    startJobPolling();
   }
 
   function applyHiddenState(hidden) {
@@ -254,7 +274,7 @@
       img.hidden = hidden;
     }
     if (hidden) {
-      stopMascot();
+      stopMascot({ stopJobs: false });
     } else {
       startMascot();
     }
@@ -265,17 +285,21 @@
       const resp = await fetch("/api/jobs/updates");
       if (!resp.ok) return;
       const data = await resp.json();
-      if (isHidden) return;
-      (data.jobs || []).forEach((j) => {
-        hideTip();
-        const tone = j.status === "success" ? "success" : "error";
-        showTip({
-          variant: "card",
-          message: j.message || (j.status === "success" ? "Trabajo finalizado" : "Trabajo con error"),
-          duration: 12000,
-          tone,
+      const jobs = data.jobs || [];
+      if (!jobs.length) return;
+      if (!isHidden) {
+        jobs.forEach((j) => {
+          hideTip();
+          const tone = j.status === "success" ? "success" : "error";
+          showTip({
+            variant: "card",
+            message: j.message || (j.status === "success" ? "Trabajo finalizado" : "Trabajo con error"),
+            duration: 12000,
+            tone,
+          });
         });
-      });
+      }
+      scheduleRefresh();
     } catch (e) {
       // ignora errores de red
     }
@@ -291,6 +315,9 @@
 
   const initialHidden = toggle ? readHiddenPreference() : false;
   applyHiddenState(initialHidden);
+  if (!document.hidden) {
+    startJobPolling();
+  }
 
   // Permitir que el usuario moleste a la mascota
   if (root && img) {
@@ -313,6 +340,8 @@
       stopMascot();
     } else if (!isHidden) {
       startMascot();
+    } else {
+      startJobPolling();
     }
   });
 })();
