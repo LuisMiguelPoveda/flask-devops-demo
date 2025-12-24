@@ -10,7 +10,29 @@
       </div>
     </header>
 
+    <style>
+      .flashcard-option {
+        cursor: pointer;
+      }
+
+      .flashcard-option.is-correct {
+        color: #16a34a;
+        font-weight: 700;
+      }
+
+      .flashcard-option.is-wrong {
+        color: #dc2626;
+        font-weight: 700;
+      }
+    </style>
+
     <div class="card" style="margin-bottom:14px;">
+      <div class="check-row" style="margin-bottom:12px;">
+        <input type="checkbox" id="flashcards-answer-toggle" />
+        <label for="flashcards-answer-toggle" style="margin:0;">
+          Mostrar respuestas correctas e incorrectas
+        </label>
+      </div>
       <details {% if filters_active %}open{% endif %}>
         <summary>Filtros</summary>
         <form method="get" class="filters" style="margin-top: 1rem;">
@@ -76,11 +98,16 @@
             <summary>Ver flashcards</summary>
             <div style="display:grid;gap:10px;margin-top:10px;">
               {% for card in d.flashcards %}
-                <div class="card" style="padding:10px;background:rgba(0,0,0,0.06);">
+                <div class="card" data-flashcard-card style="padding:10px;background:rgba(0,0,0,0.06);">
                   <strong>Q{{ loop.index }}.</strong> {{ card.question }}
                   <ol style="margin:8px 0 0 16px;padding:0;">
                     {% for opt in card.options %}
-                      <li {% if loop.index0 == card.correct_index %}style="font-weight:700;color:#16a34a;"{% endif %}>
+                      <li
+                        class="flashcard-option"
+                        data-correct="{{ '1' if loop.index0 == card.correct_index else '0' }}"
+                        role="button"
+                        tabindex="0"
+                      >
                         {{ opt }}
                       </li>
                     {% endfor %}
@@ -93,4 +120,56 @@
       {% endfor %}
     {% endif %}
   </section>
+
+  <script>
+    (function () {
+      const toggle = document.getElementById("flashcards-answer-toggle");
+      const optionSelector = ".flashcard-option";
+      if (!toggle) return;
+
+      const options = Array.from(document.querySelectorAll(optionSelector));
+
+      function clearAllHighlights() {
+        options.forEach((opt) => opt.classList.remove("is-correct", "is-wrong"));
+      }
+
+      function applyGlobalHighlights() {
+        options.forEach((opt) => {
+          const isCorrect = opt.dataset.correct === "1";
+          opt.classList.remove("is-correct", "is-wrong");
+          opt.classList.add(isCorrect ? "is-correct" : "is-wrong");
+        });
+      }
+
+      function updateFromToggle() {
+        if (toggle.checked) {
+          applyGlobalHighlights();
+        } else {
+          clearAllHighlights();
+        }
+      }
+
+      function handleOptionActivate(option) {
+        if (toggle.checked) return;
+        const card = option.closest("[data-flashcard-card]");
+        if (!card) return;
+        card.querySelectorAll(optionSelector).forEach((opt) => opt.classList.remove("is-correct", "is-wrong"));
+        const isCorrect = option.dataset.correct === "1";
+        option.classList.add(isCorrect ? "is-correct" : "is-wrong");
+      }
+
+      toggle.addEventListener("change", updateFromToggle);
+      updateFromToggle();
+
+      options.forEach((opt) => {
+        opt.addEventListener("click", () => handleOptionActivate(opt));
+        opt.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleOptionActivate(opt);
+          }
+        });
+      });
+    })();
+  </script>
 {% endblock %}
