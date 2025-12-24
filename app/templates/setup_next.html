@@ -6,8 +6,12 @@
   <div class="card">
     <h2>Configuración completada</h2>
     <p>¡Listo, {{ student_name }}! La generación rápida de materiales llegará en la siguiente pantalla (próximamente).</p>
+    <p class="subtle">Puedes completar asignaturas y exámenes cuando quieras.</p>
 
     <ul class="nav-list" data-nav style="margin-top:12px;">
+      <li>
+        <a class="nav-option" href="{{ url_for('setup_subjects') }}">Añadir asignaturas y exámenes</a>
+      </li>
       <li>
         <a class="nav-option" href="{{ url_for('dashboard') }}">Ir al menú principal</a>
       </li>

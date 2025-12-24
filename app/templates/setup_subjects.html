@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Asignaturas y exámenes{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2>Asignaturas y exámenes (opcional)</h2>
+    <p>Puedes añadirlos ahora o dejarlo para más adelante.</p>
+
+    <form method="post" id="subjects-form">
+      <div id="subjects-root" style="display:grid; gap:12px;"></div>
+
+      <button class="btn-primary" type="button" id="add-subject-btn" style="width:fit-content;">
+        + Añadir asignatura
+      </button>
+
+      <input type="hidden" name="subjects_payload" id="subjects_payload" />
+
+      <ul class="nav-list" data-nav style="margin-top:16px;">
+        <li>
+          <button class="nav-option btn-primary" type="submit">Guardar y continuar</button>
+        </li>
+        <li>
+          <a class="nav-option" href="{{ url_for('setup_next') }}">Omitir por ahora</a>
+        </li>
+      </ul>
+    </form>
+  </div>
+
+  <template id="subject-template">
+    <section data-subject style="padding:12px; border:1px solid rgba(0,0,0,0.12); border-radius:14px; background:rgba(255,255,255,0.9); display:grid; gap:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <strong data-subject-title>Asignatura</strong>
+        <button type="button" data-remove-subject style="background:#dc2626;">Eliminar asignatura</button>
+      </div>
+
+      <div>
+        <label>Nombre de la asignatura</label>
+        <input data-subject-name placeholder="Ej: Matemáticas" required />
+      </div>
+
+      <div data-exams style="display:grid; gap:10px;"></div>
+
+      <button type="button" data-add-exam style="width:fit-content;">+ Añadir examen</button>
+    </section>
+  </template>
+
+  <template id="exam-template">
+    <div data-exam style="display:grid; grid-template-columns:160px 1fr auto; gap:10px; align-items:end;">
+      <div>
+        <label>Fecha</label>
+        <input data-exam-date type="date" required />
+      </div>
+      <div>
+        <label>Tema</label>
+        <input data-exam-tema placeholder="Ej: Álgebra lineal" required />
+      </div>
+      <div>
+        <button type="button" data-remove-exam style="background:#b91c1c;">Quitar</button>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    const subjectsRoot = document.getElementById("subjects-root");
+    const subjectTemplate = document.getElementById("subject-template");
+    const examTemplate = document.getElementById("exam-template");
+    const addSubjectBtn = document.getElementById("add-subject-btn");
+    const form = document.getElementById("subjects-form");
+    const payloadInput = document.getElementById("subjects_payload");
+
+    function updateSubjectTitles() {
+      const blocks = Array.from(subjectsRoot.querySelectorAll("[data-subject]"));
+      blocks.forEach((block, idx) => {
+        const title = block.querySelector("[data-subject-title]");
+        if (title) title.textContent = `Asignatura ${idx + 1}`;
+      });
+    }
+
+    function addExam(examsRoot, data = {}) {
+      const fragment = examTemplate.content.cloneNode(true);
+      const examEl = fragment.querySelector("[data-exam]");
+      const dateInput = examEl.querySelector("[data-exam-date]");
+      const temaInput = examEl.querySelector("[data-exam-tema]");
+      const removeBtn = examEl.querySelector("[data-remove-exam]");
+
+      if (data.date) dateInput.value = data.date;
+      if (data.tema) temaInput.value = data.tema;
+
+      removeBtn.addEventListener("click", () => {
+        examEl.remove();
+      });
+
+      examsRoot.appendChild(fragment);
+    }
+
+    function addSubject(data = {}) {
+      const fragment = subjectTemplate.content.cloneNode(true);
+      const subjectEl = fragment.querySelector("[data-subject]");
+      const nameInput = subjectEl.querySelector("[data-subject-name]");
+      const examsRoot = subjectEl.querySelector("[data-exams]");
+      const addExamBtn = subjectEl.querySelector("[data-add-exam]");
+      const removeSubjectBtn = subjectEl.querySelector("[data-remove-subject]");
+
+      if (data.name) nameInput.value = data.name;
+
+      addExamBtn.addEventListener("click", () => addExam(examsRoot));
+      removeSubjectBtn.addEventListener("click", () => {
+        subjectEl.remove();
+        updateSubjectTitles();
+      });
+
+      if (Array.isArray(data.exams) && data.exams.length) {
+        data.exams.forEach((exam) => addExam(examsRoot, exam));
+      } else {
+        addExam(examsRoot);
+      }
+
+      subjectsRoot.appendChild(fragment);
+      updateSubjectTitles();
+    }
+
+    addSubjectBtn.addEventListener("click", () => addSubject());
+
+    if (form) {
+      form.addEventListener("submit", () => {
+        const subjects = [];
+        subjectsRoot.querySelectorAll("[data-subject]").forEach((subjectEl) => {
+          const name = subjectEl.querySelector("[data-subject-name]").value.trim();
+          const exams = [];
+          subjectEl.querySelectorAll("[data-exam]").forEach((examEl) => {
+            const date = examEl.querySelector("[data-exam-date]").value;
+            const tema = examEl.querySelector("[data-exam-tema]").value.trim();
+            exams.push({ date, tema });
+          });
+          subjects.push({ name, exams });
+        });
+        payloadInput.value = JSON.stringify(subjects);
+      });
+    }
+
+    const seed = {{ subjects_seed | tojson }};
+    if (Array.isArray(seed) && seed.length) {
+      seed.forEach((subject) => addSubject(subject));
+    }
+  </script>
+{% endblock %}

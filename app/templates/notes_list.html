@@ -6,31 +6,39 @@
   <div class="card">
     <h2>Consultar apuntes</h2>
 
-    <form method="get" style="margin-bottom: 1rem;">
-      <div>
-        <label for="subject_id">Asignatura</label>
-        <select id="subject_id" name="subject_id">
-          <option value="">(todas)</option>
-          {% for s in subjects %}
-            <option value="{{ s.id }}" {% if filters.subject_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
+    <details {% if filters_active %}open{% endif %}>
+      <summary>Filtros</summary>
+      <form method="get" style="margin: 1rem 0;">
+        <div>
+          <label for="subject_id">Asignatura</label>
+          <select id="subject_id" name="subject_id">
+            <option value="">(todas)</option>
+            {% for s in subjects %}
+              <option value="{{ s.id }}" {% if filters.subject_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
 
-      <div>
-        <label for="exam_date">Fecha de examen</label>
-        <input id="exam_date" name="exam_date" type="date" value="{{ filters.exam_date }}" />
-      </div>
+        <div>
+          <label for="tema">Tema</label>
+          <select id="tema" name="tema">
+            <option value="">(todos)</option>
+            {% for t in temas %}
+              <option value="{{ t }}" {% if filters.tema == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
 
-      <div>
-        <label for="title">Título contiene</label>
-        <input id="title" name="title" type="text" value="{{ filters.title }}" placeholder="Ej: Derivadas" />
-      </div>
+        <div>
+          <label for="title">Título contiene</label>
+          <input id="title" name="title" type="text" value="{{ filters.title }}" placeholder="Ej: Derivadas" />
+        </div>
 
-      <button type="submit">Filtrar</button>
-      <a href="{{ url_for('notes_list') }}" style="margin-left: 1rem;">Limpiar</a>
-      <a href="{{ url_for('dashboard') }}" style="margin-left: 1rem;">Volver al menú</a>
-    </form>
+        <button type="submit">Filtrar</button>
+        <a href="{{ url_for('notes_list') }}" style="margin-left: 1rem;">Limpiar</a>
+        <a href="{{ url_for('dashboard') }}" style="margin-left: 1rem;">Volver al menú</a>
+      </form>
+    </details>
 
     {% if notes|length == 0 %}
       <p>No hay apuntes con esos filtros.</p>
@@ -41,6 +49,8 @@
           <p>
             <strong>Asignatura:</strong> {{ n.subject.name }} |
             <strong>Fecha de examen:</strong> {{ n.exam_date if n.exam_date else "—" }} |
+            {% set tema_list = note_temas.get(n.id) %}
+            <strong>Tema:</strong> {{ tema_list|join(", ") if tema_list else "—" }} |
             <strong>Modelo:</strong>
             {% if n.ai_used %}
               {{ note_models.get(n.id, "—") }}
@@ -60,6 +70,14 @@
 
           <div style="margin-top: .75rem;">
             <a href="{{ url_for('note_edit', note_id=n.id) }}">Editar</a>
+            {% set source_file = source_files.get(n.id) %}
+            {% if n.ai_used and source_file %}
+              <a
+                href="{{ url_for('note_source_file', note_id=n.id) }}"
+                class="nav-option"
+                style="display:inline-block; margin-left:8px;"
+              >Archivo original: {{ source_file.filename }}</a>
+            {% endif %}
 
             <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" style="display:inline;">
               <button type="submit" onclick="return confirm('¿Seguro que quieres borrar este apunte?');">

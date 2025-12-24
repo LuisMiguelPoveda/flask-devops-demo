@@ -11,33 +11,41 @@
     </header>
 
     <div class="card" style="margin-bottom:14px;">
-      <form method="get" class="filters">
-        <div>
-          <label for="subject_id">Asignatura</label>
-          <select id="subject_id" name="subject_id">
-            <option value="">(todas)</option>
-            {% for s in subjects %}
-              <option value="{{ s.id }}" {% if filters.subject_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
+      <details {% if filters_active %}open{% endif %}>
+        <summary>Filtros</summary>
+        <form method="get" class="filters" style="margin-top: 1rem;">
+          <div>
+            <label for="subject_id">Asignatura</label>
+            <select id="subject_id" name="subject_id">
+              <option value="">(todas)</option>
+              {% for s in subjects %}
+                <option value="{{ s.id }}" {% if filters.subject_id|string == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
 
-        <div>
-          <label for="exam_date">Fecha de examen</label>
-          <input id="exam_date" name="exam_date" type="date" value="{{ filters.exam_date }}" />
-        </div>
+          <div>
+            <label for="tema">Tema</label>
+            <select id="tema" name="tema">
+              <option value="">(todos)</option>
+              {% for t in temas %}
+                <option value="{{ t }}" {% if filters.tema == t %}selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            </select>
+          </div>
 
-        <div>
-          <label for="title">Título contiene</label>
-          <input id="title" name="title" value="{{ filters.title }}" placeholder="Ej: fotosíntesis" />
-        </div>
+          <div>
+            <label for="title">Título contiene</label>
+            <input id="title" name="title" value="{{ filters.title }}" placeholder="Ej: fotosíntesis" />
+          </div>
 
-        <ul class="nav-list" data-nav>
-          <li><button class="nav-option btn-primary" type="submit">Filtrar</button></li>
-          <li><a class="nav-option" href="{{ url_for('flashcards_list') }}">Limpiar</a></li>
-          <li><a class="nav-option" href="{{ url_for('flashcards_create') }}">Crear flashcards</a></li>
-        </ul>
-      </form>
+          <ul class="nav-list" data-nav>
+            <li><button class="nav-option btn-primary" type="submit">Filtrar</button></li>
+            <li><a class="nav-option" href="{{ url_for('flashcards_list') }}">Limpiar</a></li>
+            <li><a class="nav-option" href="{{ url_for('flashcards_create') }}">Crear flashcards</a></li>
+          </ul>
+        </form>
+      </details>
     </div>
 
     {% if decks|length == 0 %}
@@ -51,6 +59,8 @@
               <p style="margin:4px 0 0 0;">
                 <strong>Asignatura:</strong> {{ d.subject.name }} |
                 <strong>Fecha de examen:</strong> {{ d.exam_date if d.exam_date else "—" }} |
+                {% set tema_list = deck_temas.get(d.id) %}
+                <strong>Tema:</strong> {{ tema_list|join(", ") if tema_list else "—" }} |
                 <strong>Flashcards:</strong> {{ d.flashcards|length }}
               </p>
             </div>

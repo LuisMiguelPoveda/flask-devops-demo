@@ -12,7 +12,7 @@ from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
 from flask_login import (
     LoginManager,
     login_user,
@@ -22,7 +22,7 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Note, FlashcardDeck, Job, AskProfeMessage, StudentProfile, SubjectExam
+from .models import db, User, Subject, Note, FlashcardDeck, Job, AskProfeMessage, StudentProfile, SubjectExam, NoteSourceFile
 
 
 ALLOWED_EXTENSIONS = {"txt", "pdf"}
@@ -178,22 +178,23 @@ def prune_ask_profe_history(user_id: int, keep: int = 12) -> None:
         db.session.delete(msg)
 
 
+def fetch_tema_options(user_id: int, subject_id: int | None = None) -> list[str]:
+    q = (
+        db.session.query(SubjectExam.tema)
+        .join(Subject, SubjectExam.subject_id == Subject.id)
+        .filter(Subject.user_id == user_id)
+    )
+    if subject_id:
+        q = q.filter(SubjectExam.subject_id == subject_id)
+    rows = q.distinct().order_by(SubjectExam.tema.asc()).all()
+    return [r[0] for r in rows if r[0]]
+
+
 def is_setup_complete(user_id: int) -> bool:
     if not user_id:
         return False
     profile = StudentProfile.query.filter_by(user_id=user_id).first()
-    if not profile:
-        return False
-    has_subject = Subject.query.filter_by(user_id=user_id).first()
-    if not has_subject:
-        return False
-    has_exam = (
-        db.session.query(SubjectExam.id)
-        .join(Subject, SubjectExam.subject_id == Subject.id)
-        .filter(Subject.user_id == user_id)
-        .first()
-    )
-    return has_exam is not None
+    return profile is not None
 
 
 def allowed_file(filename: str) -> bool:
@@ -662,19 +663,15 @@ def create_app():
     @app.route("/setup", methods=["GET", "POST"])
     @login_required
     def setup():
-        if is_setup_complete(current_user.id):
-            return redirect(url_for("setup_next"))
-
-        student_name = ""
-        student_age = ""
-        personality_notes = ""
-        subjects_seed: list[dict] = []
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        student_name = profile.student_name if profile else ""
+        student_age = str(profile.age) if profile else ""
+        personality_notes = profile.personality_notes if profile else ""
 
         if request.method == "POST":
             student_name = (request.form.get("student_name") or "").strip()
             student_age = (request.form.get("student_age") or "").strip()
             personality_notes = (request.form.get("personality_notes") or "").strip()
-            subjects_payload = request.form.get("subjects_payload") or ""
 
             errors: list[str] = []
             if not student_name:
@@ -691,61 +688,6 @@ def create_app():
             if not personality_notes:
                 errors.append("Añade detalles de personalidad para contextualizar al profe.")
 
-            subjects_clean: list[dict] = []
-            subjects_seed = []
-            if not subjects_payload:
-                errors.append("Añade al menos una asignatura con sus exámenes.")
-            else:
-                try:
-                    raw_subjects = json.loads(subjects_payload)
-                except (TypeError, ValueError):
-                    raw_subjects = None
-                    errors.append("No se pudo leer la lista de asignaturas.")
-
-                if raw_subjects is not None:
-                    if not isinstance(raw_subjects, list) or not raw_subjects:
-                        errors.append("Añade al menos una asignatura con sus exámenes.")
-                    else:
-                        seen_names: set[str] = set()
-                        for subj in raw_subjects:
-                            name = (subj.get("name") or "").strip() if isinstance(subj, dict) else ""
-                            exams = subj.get("exams") if isinstance(subj, dict) else []
-                            subject_seed = {"name": name, "exams": []}
-
-                            if not name:
-                                errors.append("Cada asignatura necesita un nombre.")
-                            lowered = name.lower()
-                            if name and lowered in seen_names:
-                                errors.append(f"La asignatura \"{name}\" está duplicada.")
-                            if name:
-                                seen_names.add(lowered)
-
-                            if not isinstance(exams, list) or not exams:
-                                errors.append(f"La asignatura \"{name or 'sin nombre'}\" necesita al menos un examen.")
-                            else:
-                                exam_entries: list[dict] = []
-                                for exam in exams:
-                                    date_str = (exam.get("date") or "").strip() if isinstance(exam, dict) else ""
-                                    tema = (exam.get("tema") or "").strip() if isinstance(exam, dict) else ""
-                                    subject_seed["exams"].append({"date": date_str, "tema": tema})
-                                    if not date_str or not tema:
-                                        errors.append(
-                                            f"Cada examen de \"{name or 'sin nombre'}\" debe tener fecha y tema."
-                                        )
-                                        continue
-                                    try:
-                                        exam_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-                                    except ValueError:
-                                        errors.append(
-                                            f"Formato de fecha inválido en \"{name or 'sin nombre'}\": {date_str}."
-                                        )
-                                        continue
-                                    exam_entries.append({"date": exam_date, "tema": tema})
-                                if name and exam_entries:
-                                    subjects_clean.append({"name": name, "exams": exam_entries})
-
-                            subjects_seed.append(subject_seed)
-
             if errors:
                 for err in errors:
                     flash(err, "error")
@@ -754,7 +696,6 @@ def create_app():
                     student_name=student_name,
                     student_age=student_age,
                     personality_notes=personality_notes,
-                    subjects_seed=subjects_seed,
                 )
 
             try:
@@ -772,6 +713,118 @@ def create_app():
                     )
                     db.session.add(profile)
 
+                db.session.commit()
+                flash("Datos guardados ✅", "success")
+                return redirect(url_for("setup_subjects"))
+            except Exception:
+                db.session.rollback()
+                flash("Error guardando la configuración.", "error")
+                return render_template(
+                    "setup.html",
+                    student_name=student_name,
+                    student_age=student_age,
+                    personality_notes=personality_notes,
+                )
+
+        return render_template(
+            "setup.html",
+            student_name=student_name,
+            student_age=student_age,
+            personality_notes=personality_notes,
+        )
+
+    @app.route("/setup/subjects", methods=["GET", "POST"])
+    @login_required
+    def setup_subjects():
+        if not is_setup_complete(current_user.id):
+            return redirect(url_for("setup"))
+
+        subjects_seed: list[dict] = []
+
+        if request.method == "POST":
+            subjects_payload = request.form.get("subjects_payload") or ""
+            subjects_clean: list[dict] = []
+            errors: list[str] = []
+
+            raw_subjects = []
+            if subjects_payload:
+                try:
+                    raw_subjects = json.loads(subjects_payload)
+                except (TypeError, ValueError):
+                    raw_subjects = None
+                    errors.append("No se pudo leer la lista de asignaturas.")
+
+            if raw_subjects is not None:
+                if not isinstance(raw_subjects, list):
+                    errors.append("Formato inválido de asignaturas.")
+                else:
+                    seen_names: set[str] = set()
+                    for subj in raw_subjects:
+                        if not isinstance(subj, dict):
+                            continue
+                        name = (subj.get("name") or "").strip()
+                        exams = subj.get("exams") if isinstance(subj, dict) else []
+                        if not isinstance(exams, list):
+                            exams = []
+                        subject_seed = {"name": name, "exams": []}
+
+                        subject_has_content = bool(name)
+                        for exam in exams:
+                            date_str = (exam.get("date") or "").strip() if isinstance(exam, dict) else ""
+                            tema = (exam.get("tema") or "").strip() if isinstance(exam, dict) else ""
+                            if date_str or tema:
+                                subject_has_content = True
+                            subject_seed["exams"].append({"date": date_str, "tema": tema})
+
+                        if not subject_has_content:
+                            continue
+
+                        subjects_seed.append(subject_seed)
+
+                        if not name:
+                            errors.append("Cada asignatura necesita un nombre.")
+                            continue
+                        lowered = name.lower()
+                        if lowered in seen_names:
+                            errors.append(f"La asignatura \"{name}\" está duplicada.")
+                            continue
+                        seen_names.add(lowered)
+
+                        exam_entries: list[dict] = []
+                        for exam in exams:
+                            date_str = (exam.get("date") or "").strip() if isinstance(exam, dict) else ""
+                            tema = (exam.get("tema") or "").strip() if isinstance(exam, dict) else ""
+                            if not date_str and not tema:
+                                continue
+                            if not date_str or not tema:
+                                errors.append(
+                                    f"Cada examen de \"{name}\" debe tener fecha y tema."
+                                )
+                                continue
+                            try:
+                                exam_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                            except ValueError:
+                                errors.append(
+                                    f"Formato de fecha inválido en \"{name}\": {date_str}."
+                                )
+                                continue
+                            exam_entries.append({"date": exam_date, "tema": tema})
+
+                        if not exam_entries:
+                            errors.append(f"La asignatura \"{name}\" necesita al menos un examen.")
+                            continue
+
+                        subjects_clean.append({"name": name, "exams": exam_entries})
+
+            if errors:
+                for err in errors:
+                    flash(err, "error")
+                return render_template("setup_subjects.html", subjects_seed=subjects_seed)
+
+            if not subjects_clean:
+                return redirect(url_for("setup_next"))
+
+            try:
                 for subj in subjects_clean:
                     subject = Subject.query.filter_by(user_id=current_user.id, name=subj["name"]).first()
                     if not subject:
@@ -792,28 +845,15 @@ def create_app():
                                     tema=exam["tema"],
                                 )
                             )
-
                 db.session.commit()
-                flash("Configuración guardada ✅", "success")
+                flash("Asignaturas guardadas ✅", "success")
                 return redirect(url_for("setup_next"))
             except Exception:
                 db.session.rollback()
-                flash("Error guardando la configuración.", "error")
-                return render_template(
-                    "setup.html",
-                    student_name=student_name,
-                    student_age=student_age,
-                    personality_notes=personality_notes,
-                    subjects_seed=subjects_seed,
-                )
+                flash("Error guardando las asignaturas.", "error")
+                return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
-        return render_template(
-            "setup.html",
-            student_name=student_name,
-            student_age=student_age,
-            personality_notes=personality_notes,
-            subjects_seed=subjects_seed,
-        )
+        return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
     @app.route("/setup/next")
     @login_required
@@ -1050,6 +1090,8 @@ def create_app():
 
             upload = request.files.get("file")
             file_text = ""
+            file_bytes = None
+            file_mime = None
             if upload and upload.filename:
                 if not allowed_file(upload.filename):
                     flash("Solo se permiten archivos .txt o .pdf.", "error")
@@ -1063,6 +1105,7 @@ def create_app():
                     flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
                     return redirect(url_for("add_notes"))
                 ext = filename.rsplit(".", 1)[1].lower()
+                file_mime = upload.mimetype or ("application/pdf" if ext == "pdf" else "text/plain")
                 if ext == "pdf":
                     file_text = extract_pdf_text(file_bytes)
                 else:
@@ -1133,6 +1176,16 @@ def create_app():
                 ai_used=True,
             )
             db.session.add(note)
+            db.session.flush()
+            if file_bytes:
+                db.session.add(
+                    NoteSourceFile(
+                        note_id=note.id,
+                        filename=filename or "input.txt",
+                        content_type=file_mime or "application/octet-stream",
+                        data=file_bytes,
+                    )
+                )
             db.session.commit()
 
             for idx, chunk in enumerate(chunks):
@@ -1181,26 +1234,30 @@ def create_app():
     def notes_list():
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
         subject_id = request.args.get("subject_id", type=int)
-        exam_date_str = (request.args.get("exam_date") or "").strip()
+        tema_q = (request.args.get("tema") or "").strip()
         title_q = (request.args.get("title") or "").strip()
 
         q = Note.query.filter_by(user_id=current_user.id)
         if subject_id:
             q = q.filter(Note.subject_id == subject_id)
-        if exam_date_str:
-            try:
-                d = datetime.strptime(exam_date_str, "%Y-%m-%d").date()
-                q = q.filter(Note.exam_date == d)
-            except ValueError:
-                flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
+        if tema_q:
+            q = q.join(
+                SubjectExam,
+                (SubjectExam.subject_id == Note.subject_id) & (SubjectExam.exam_date == Note.exam_date),
+            ).filter(SubjectExam.tema == tema_q)
         if title_q:
             q = q.filter(Note.title.ilike(f"%{title_q}%"))
 
         notes = q.order_by(Note.updated_at.desc()).all()
+        tema_options = fetch_tema_options(current_user.id, subject_id)
+        filters_active = bool(subject_id or tema_q or title_q)
         chunk_totals: dict[int, int] = {}
         note_models: dict[int, str] = {}
+        source_files: dict[int, NoteSourceFile] = {}
+        note_temas: dict[int, list[str]] = {}
         if notes:
             note_ids = {n.id for n in notes}
+            exam_pairs = {(n.subject_id, n.exam_date) for n in notes if n.exam_date}
             jobs = Job.query.filter(
                 Job.user_id == current_user.id,
                 Job.type == "note_ai_chunk",
@@ -1220,14 +1277,52 @@ def create_app():
                 model = payload.get("model")
                 if model:
                     note_models.setdefault(note_id, model)
+            source_rows = NoteSourceFile.query.filter(NoteSourceFile.note_id.in_(note_ids)).all()
+            source_files = {s.note_id: s for s in source_rows}
+            if exam_pairs:
+                subject_ids = {sid for sid, _ in exam_pairs}
+                exam_dates = {d for _, d in exam_pairs}
+                tema_rows = SubjectExam.query.filter(
+                    SubjectExam.subject_id.in_(subject_ids),
+                    SubjectExam.exam_date.in_(exam_dates),
+                ).all()
+                temas_by_pair: dict[tuple, list[str]] = {}
+                for row in tema_rows:
+                    key = (row.subject_id, row.exam_date)
+                    temas_by_pair.setdefault(key, []).append(row.tema)
+                for note in notes:
+                    if not note.exam_date:
+                        continue
+                    temas = temas_by_pair.get((note.subject_id, note.exam_date))
+                    if temas:
+                        note_temas[note.id] = sorted(set(temas))
 
         return render_template(
             "notes_list.html",
             subjects=subjects,
             notes=notes,
-            filters={"subject_id": subject_id or "", "exam_date": exam_date_str, "title": title_q},
+            filters={"subject_id": subject_id or "", "tema": tema_q, "title": title_q},
             chunk_totals=chunk_totals,
             note_models=note_models,
+            source_files=source_files,
+            note_temas=note_temas,
+            temas=tema_options,
+            filters_active=filters_active,
+        )
+
+    @app.route("/notes/<int:note_id>/source-file")
+    @login_required
+    def note_source_file(note_id: int):
+        note = Note.query.filter_by(id=note_id, user_id=current_user.id).first_or_404()
+        source = NoteSourceFile.query.filter_by(note_id=note.id).first()
+        if not source:
+            flash("No se encontró el archivo original.", "error")
+            return redirect(url_for("notes_list"))
+        return send_file(
+            BytesIO(source.data),
+            mimetype=source.content_type or "application/octet-stream",
+            download_name=source.filename or "archivo_original",
+            as_attachment=True,
         )
 
     @app.route("/notes/merge", methods=["POST"])
@@ -1293,6 +1388,7 @@ def create_app():
             note.content = content
             note.ai_used = False
             note.original_filename = None
+            NoteSourceFile.query.filter_by(note_id=note.id).delete()
 
             db.session.commit()
             flash("Apunte actualizado ✅", "success")
@@ -1304,6 +1400,7 @@ def create_app():
     @login_required
     def note_delete(note_id: int):
         note = Note.query.filter_by(id=note_id, user_id=current_user.id).first_or_404()
+        NoteSourceFile.query.filter_by(note_id=note.id).delete()
         db.session.delete(note)
         db.session.commit()
         flash("Apunte borrado ✅", "success")
@@ -1495,7 +1592,7 @@ def create_app():
     def flashcards_list():
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
         subject_id = request.args.get("subject_id", type=int)
-        exam_date_str = (request.args.get("exam_date") or "").strip()
+        tema_q = (request.args.get("tema") or "").strip()
         title_q = (request.args.get("title") or "").strip()
 
         q = FlashcardDeck.query.filter_by(user_id=current_user.id)
@@ -1503,23 +1600,48 @@ def create_app():
         if subject_id:
             q = q.filter(FlashcardDeck.subject_id == subject_id)
 
-        if exam_date_str:
-            try:
-                d = datetime.strptime(exam_date_str, "%Y-%m-%d").date()
-                q = q.filter(FlashcardDeck.exam_date == d)
-            except ValueError:
-                flash("Formato de fecha inválido (YYYY-MM-DD).", "error")
+        if tema_q:
+            q = q.join(
+                SubjectExam,
+                (SubjectExam.subject_id == FlashcardDeck.subject_id)
+                & (SubjectExam.exam_date == FlashcardDeck.exam_date),
+            ).filter(SubjectExam.tema == tema_q)
 
         if title_q:
             q = q.filter(FlashcardDeck.title.ilike(f"%{title_q}%"))
 
         decks = q.order_by(FlashcardDeck.updated_at.desc()).all()
+        deck_temas: dict[int, list[str]] = {}
+        if decks:
+            exam_pairs = {(d.subject_id, d.exam_date) for d in decks if d.exam_date}
+            if exam_pairs:
+                subject_ids = {sid for sid, _ in exam_pairs}
+                exam_dates = {d for _, d in exam_pairs}
+                tema_rows = SubjectExam.query.filter(
+                    SubjectExam.subject_id.in_(subject_ids),
+                    SubjectExam.exam_date.in_(exam_dates),
+                ).all()
+                temas_by_pair: dict[tuple, list[str]] = {}
+                for row in tema_rows:
+                    key = (row.subject_id, row.exam_date)
+                    temas_by_pair.setdefault(key, []).append(row.tema)
+                for deck in decks:
+                    if not deck.exam_date:
+                        continue
+                    temas = temas_by_pair.get((deck.subject_id, deck.exam_date))
+                    if temas:
+                        deck_temas[deck.id] = sorted(set(temas))
+        tema_options = fetch_tema_options(current_user.id, subject_id)
+        filters_active = bool(subject_id or tema_q or title_q)
 
         return render_template(
             "flashcards_list.html",
             subjects=subjects,
             decks=decks,
-            filters={"subject_id": subject_id or "", "exam_date": exam_date_str, "title": title_q},
+            filters={"subject_id": subject_id or "", "tema": tema_q, "title": title_q},
+            temas=tema_options,
+            filters_active=filters_active,
+            deck_temas=deck_temas,
         )
 
     @app.route("/flashcards/<int:deck_id>/edit", methods=["GET", "POST"])

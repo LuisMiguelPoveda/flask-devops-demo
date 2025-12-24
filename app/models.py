@@ -57,6 +57,7 @@ class Note(db.Model):
 
     user = db.relationship("User", back_populates="notes")
     subject = db.relationship("Subject", back_populates="notes")
+    source_file = db.relationship("NoteSourceFile", back_populates="note", uselist=False, cascade="all, delete-orphan")
 
 
 class FlashcardDeck(db.Model):
@@ -87,6 +88,18 @@ class FlashcardDeck(db.Model):
     user = db.relationship("User", back_populates="flashcard_decks")
     subject = db.relationship("Subject", back_populates="flashcard_decks")
     source_note = db.relationship("Note", foreign_keys=[source_note_id])
+
+
+class NoteSourceFile(db.Model):
+    __tablename__ = "note_source_files"
+
+    note_id = db.Column(db.Integer, db.ForeignKey("notes.id"), primary_key=True)
+    filename = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(120), nullable=False)
+    data = db.Column(db.LargeBinary, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    note = db.relationship("Note", back_populates="source_file")
 
 
 class Job(db.Model):
