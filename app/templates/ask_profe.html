@@ -4,6 +4,10 @@
 
 {% block content %}
   <div class="card">
+    <div class="profe-timer" id="profe-timer" data-ends-at="{{ lock_ends_at_ts }}">
+      <span class="profe-timer__label">Tiempo reservado de tutoría restante:</span>
+      <span class="profe-timer__value" id="profe-timer-value">{{ lock_remaining_label }}</span>
+    </div>
     <h2>Pregúntale al profe</h2>
     <p>Escribe tu duda, elige un modelo y pulsa Enviar.</p>
 
@@ -60,6 +64,9 @@
     const loading = document.getElementById("loading-indicator");
     const submitBtn = document.getElementById("submit-btn");
     const question = document.getElementById("question");
+    const timer = document.getElementById("profe-timer");
+    const timerValue = document.getElementById("profe-timer-value");
+    const lockEndsAt = timer ? Number(timer.dataset.endsAt || "0") : 0;
 
     if (form && loading && submitBtn) {
       form.addEventListener("submit", function () {
@@ -76,6 +83,30 @@
           form.requestSubmit();
         }
       });
+    }
+
+    function formatRemaining(totalSeconds) {
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    function updateTimer() {
+      if (!lockEndsAt || !timerValue) return;
+      const remainingSeconds = Math.max(0, Math.ceil((lockEndsAt - Date.now()) / 1000));
+      timerValue.textContent = formatRemaining(remainingSeconds);
+      if (remainingSeconds <= 0) {
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Tiempo agotado";
+        }
+        window.location.href = "{{ url_for('dashboard') }}";
+      }
+    }
+
+    if (lockEndsAt) {
+      updateTimer();
+      setInterval(updateTimer, 1000);
     }
   </script>
 {% endblock %}

@@ -32,3 +32,6 @@ details[open]>.details-toggle::after{content:"-"}
 .action-link:hover,.action-link:focus-visible{outline:none;transform:translateY(-1px);box-shadow:0 8px 18px rgba(15,23,42,.18);border-color:rgba(59,130,246,.6);background:rgba(59,130,246,.08)}
 .action-link--danger{background:rgba(254,226,226,.92);border-color:rgba(220,38,38,.4);color:#991b1b}
 .action-link--danger:hover,.action-link--danger:focus-visible{border-color:rgba(220,38,38,.6);background:rgba(248,113,113,.16);color:#7f1d1d}
+.profe-timer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(15,23,42,.18);background:rgba(15,23,42,.06);color:#0f172a;font-weight:700}
+.profe-timer__label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:rgba(15,23,42,.68)}
+.profe-timer__value{font-size:18px;padding:4px 10px;border-radius:999px;background:rgba(15,23,42,.12)}

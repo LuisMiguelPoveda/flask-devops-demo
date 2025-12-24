@@ -2,7 +2,8 @@ import os
 import json
 import time
 import threading
-from datetime import datetime
+import math
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from io import BytesIO
 
@@ -22,7 +23,19 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Note, FlashcardDeck, Job, AskProfeMessage, StudentProfile, SubjectExam, NoteSourceFile
+from .models import (
+    db,
+    User,
+    Subject,
+    Note,
+    FlashcardDeck,
+    Job,
+    AskProfeMessage,
+    ProfeSessionLock,
+    StudentProfile,
+    SubjectExam,
+    NoteSourceFile,
+)
 
 
 ALLOWED_EXTENSIONS = {"txt", "pdf"}
@@ -545,6 +558,7 @@ def create_app():
     app.config["LMSTUDIO_API_BASE"] = os.getenv("LMSTUDIO_API_BASE", "http://127.0.0.1:1234/v1")
     app.config["LMSTUDIO_MODEL"] = os.getenv("LMSTUDIO_MODEL", "google/gemma-3-1b")
     app.config["LMSTUDIO_TIMEOUT"] = int(os.getenv("LMSTUDIO_TIMEOUT", "300"))
+    app.config["ASK_PROFE_SESSION_SECONDS"] = int(os.getenv("ASK_PROFE_SESSION_SECONDS", "300"))
 
     # App/DB
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
@@ -558,8 +572,39 @@ def create_app():
     login_manager.login_view = "login"
     login_manager.init_app(app)
 
-    def profe_is_busy() -> bool:
+    def queue_has_work() -> bool:
         return db.session.query(Job.id).filter(Job.status.in_(("pending", "running"))).first() is not None
+
+    def get_active_profe_lock(now: datetime | None = None) -> ProfeSessionLock | None:
+        now = now or datetime.utcnow()
+        lock = ProfeSessionLock.query.order_by(ProfeSessionLock.ends_at.desc()).first()
+        if not lock or not lock.ends_at:
+            return None
+        if lock.ends_at <= now:
+            return None
+        return lock
+
+    def start_profe_lock(user_id: int, now: datetime | None = None) -> ProfeSessionLock:
+        now = now or datetime.utcnow()
+        ends_at = now + timedelta(seconds=app.config["ASK_PROFE_SESSION_SECONDS"])
+        lock = ProfeSessionLock.query.order_by(ProfeSessionLock.ends_at.desc()).first()
+        if lock:
+            lock.user_id = user_id
+            lock.starts_at = now
+            lock.ends_at = ends_at
+        else:
+            lock = ProfeSessionLock(user_id=user_id, starts_at=now, ends_at=ends_at)
+            db.session.add(lock)
+        db.session.commit()
+        return lock
+
+    def profe_is_busy(user_id: int | None = None) -> bool:
+        lock = get_active_profe_lock()
+        if lock:
+            if user_id is not None and lock.user_id == user_id:
+                return False
+            return True
+        return queue_has_work()
 
     @app.context_processor
     def inject_login_flag():
@@ -571,8 +616,8 @@ def create_app():
     @app.context_processor
     def inject_profe_busy_flag():
         if not current_user.is_authenticated:
-            return {"profe_busy": False}
-        return {"profe_busy": profe_is_busy()}
+            return {"profe_busy": False, "llm_busy": False}
+        return {"profe_busy": profe_is_busy(current_user.id), "llm_busy": queue_has_work()}
 
     @app.before_request
     def enforce_setup_completion():
@@ -596,6 +641,9 @@ def create_app():
             def worker_loop():
                 while True:
                     with app.app_context():
+                        if get_active_profe_lock():
+                            time.sleep(2)
+                            continue
                         job = (
                             Job.query.filter_by(status="pending")
                             .order_by(Job.created_at.asc(), Job.id.asc())
@@ -1250,6 +1298,11 @@ def create_app():
             }
         )
 
+    @app.route("/api/profe/status")
+    @login_required
+    def api_profe_status():
+        return jsonify({"profe_busy": profe_is_busy(current_user.id), "llm_busy": queue_has_work()})
+
     @app.route("/api/jobs/updates")
     @login_required
     def api_jobs_updates():
@@ -1279,8 +1332,24 @@ def create_app():
     @app.route("/ask-profe", methods=["GET", "POST"])
     @login_required
     def ask_profe():
-        if profe_is_busy():
-            flash("El profe está ocupado procesando trabajos. Cuando termine, podrás usar «Pregúntale al profe».", "error")
+        now = datetime.utcnow()
+        lock = get_active_profe_lock(now=now)
+        if lock and lock.user_id != current_user.id:
+            flash("El profe está atendiendo a otro estudiante. Vuelve en unos minutos.", "error")
+            return redirect(url_for("dashboard"))
+
+        if not lock:
+            if request.method == "POST":
+                flash("Tu tiempo con el profe ha terminado. Vuelve al menú para iniciar otro turno.", "error")
+                return redirect(url_for("dashboard"))
+            if queue_has_work():
+                flash("El profe está ocupado procesando trabajos. Cuando termine, podrás usar «Pregúntale al profe».", "error")
+                return redirect(url_for("dashboard"))
+            lock = start_profe_lock(current_user.id, now=now)
+
+        lock_ends_at = lock.ends_at if lock else now
+        if lock_ends_at <= now:
+            flash("Tu tiempo con el profe ha terminado.", "error")
             return redirect(url_for("dashboard"))
 
         available_models = fetch_models(app)
@@ -1295,6 +1364,9 @@ def create_app():
             )
 
         if request.method == "POST":
+            if datetime.utcnow() >= lock_ends_at:
+                flash("Tu tiempo con el profe ha terminado.", "error")
+                return redirect(url_for("dashboard"))
             selected_model = request.form.get("model") or selected_model
             question = request.form.get("question", "").strip()
 
@@ -1343,7 +1415,17 @@ def create_app():
                     flash("Error inesperado procesando tu pregunta.", "error")
                     return redirect(url_for("dashboard"))
 
-        return render_template("ask_profe.html", messages=messages, models=available_models, selected_model=selected_model)
+        remaining_seconds = max(0, int(math.ceil((lock_ends_at - datetime.utcnow()).total_seconds())))
+        remaining_label = f"{remaining_seconds // 60:02d}:{remaining_seconds % 60:02d}"
+        lock_ends_at_ts = int(lock_ends_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        return render_template(
+            "ask_profe.html",
+            messages=messages,
+            models=available_models,
+            selected_model=selected_model,
+            lock_ends_at_ts=lock_ends_at_ts,
+            lock_remaining_label=remaining_label,
+        )
 
     # ---------- Subir apuntes / resumen (igual que antes) ----------
     @app.route("/add-notes", methods=["GET", "POST"])

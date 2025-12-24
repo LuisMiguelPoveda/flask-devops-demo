@@ -143,6 +143,17 @@ class AskProfeMessage(db.Model):
     )
 
 
+class ProfeSessionLock(db.Model):
+    __tablename__ = "profe_session_locks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    starts_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    ends_at = db.Column(db.DateTime, nullable=False)
+
+    user = db.relationship("User")
+
+
 class StudentProfile(db.Model):
     __tablename__ = "student_profiles"
 

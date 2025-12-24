@@ -6,6 +6,7 @@
   const justLoggedIn = (document.body.dataset.justLoggedIn || "") === "1";
   const justRegistered = (document.body.dataset.justRegistered || "") === "1";
   const profeBusy = (document.body.dataset.profeBusy || "") === "1";
+  const llmBusy = (document.body.dataset.llmBusy || "") === "1";
   const currentPage = document.body.dataset.page || "";
 
   const img = root.querySelector("[data-mascot-img]");
@@ -51,12 +52,14 @@
   let currentTip = null; // "bubble" | "card" | null
   let jobTimer = null;
   let profeNoticeTimer = null;
+  let profeStatusTimer = null;
   let loginHandled = false;
   let isHidden = false;
   let refreshQueued = false;
 
   function scheduleRefresh(delay = 900) {
     if (refreshQueued) return;
+    if (currentPage === "notes_list" || currentPage === "flashcards_list") return;
     refreshQueued = true;
     setTimeout(() => {
       window.location.reload();
@@ -226,6 +229,35 @@
     }
   }
 
+  async function pollProfeStatus() {
+    if (currentPage !== "dashboard") return;
+    try {
+      const resp = await fetch("/api/profe/status");
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const nextBusy = !!data.profe_busy;
+      const nextLlmBusy = !!data.llm_busy;
+      if (nextBusy !== profeBusy || nextLlmBusy !== llmBusy) {
+        window.location.reload();
+      }
+    } catch (e) {
+      // ignora errores de red
+    }
+  }
+
+  function startProfeStatusPolling() {
+    if (profeStatusTimer || currentPage !== "dashboard") return;
+    pollProfeStatus();
+    profeStatusTimer = setInterval(pollProfeStatus, 4000);
+  }
+
+  function stopProfeStatusPolling() {
+    if (profeStatusTimer) {
+      clearInterval(profeStatusTimer);
+      profeStatusTimer = null;
+    }
+  }
+
   function stopMascot(options = {}) {
     const stopJobs = options.stopJobs !== false;
     if (idleTimer) {
@@ -317,6 +349,7 @@
   applyHiddenState(initialHidden);
   if (!document.hidden) {
     startJobPolling();
+    startProfeStatusPolling();
   }
 
   // Permitir que el usuario moleste a la mascota
@@ -338,10 +371,13 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopMascot();
+      stopProfeStatusPolling();
     } else if (!isHidden) {
       startMascot();
+      startProfeStatusPolling();
     } else {
       startJobPolling();
+      startProfeStatusPolling();
     }
   });
 })();
