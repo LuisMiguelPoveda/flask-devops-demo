@@ -12,17 +12,36 @@
 
     <style>
       .flashcard-option {
+        display: block;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.14);
+        background: rgba(15, 23, 42, 0.04);
+        transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease;
         cursor: pointer;
+      }
+
+      .flashcard-option:hover,
+      .flashcard-option:focus-visible {
+        outline: none;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+        border-color: rgba(59, 130, 246, 0.6);
+        background: rgba(59, 130, 246, 0.08);
       }
 
       .flashcard-option.is-correct {
         color: #16a34a;
         font-weight: 700;
+        border-color: rgba(22, 163, 74, 0.6);
+        background: rgba(22, 163, 74, 0.12);
       }
 
       .flashcard-option.is-wrong {
         color: #dc2626;
         font-weight: 700;
+        border-color: rgba(220, 38, 38, 0.6);
+        background: rgba(220, 38, 38, 0.12);
       }
     </style>
 
@@ -126,6 +145,24 @@
       const toggle = document.getElementById("flashcards-answer-toggle");
       const optionSelector = ".flashcard-option";
       if (!toggle) return;
+
+      function shuffleArray(items) {
+        for (let i = items.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [items[i], items[j]] = [items[j], items[i]];
+        }
+        return items;
+      }
+
+      const cards = Array.from(document.querySelectorAll("[data-flashcard-card]"));
+      cards.forEach((card) => {
+        const list = card.querySelector("ol");
+        if (!list) return;
+        const items = Array.from(list.querySelectorAll(optionSelector));
+        if (items.length < 2) return;
+        const shuffled = shuffleArray(items.slice());
+        shuffled.forEach((item) => list.appendChild(item));
+      });
 
       const options = Array.from(document.querySelectorAll(optionSelector));
 
