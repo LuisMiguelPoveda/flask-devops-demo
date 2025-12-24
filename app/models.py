@@ -16,6 +16,7 @@ class User(db.Model, UserMixin):
     notes = db.relationship("Note", back_populates="user", cascade="all, delete-orphan")
     flashcard_decks = db.relationship("FlashcardDeck", back_populates="user", cascade="all, delete-orphan")
     ask_profe_messages = db.relationship("AskProfeMessage", back_populates="user", cascade="all, delete-orphan")
+    profile = db.relationship("StudentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 class Subject(db.Model):
@@ -28,6 +29,7 @@ class Subject(db.Model):
     user = db.relationship("User", back_populates="subjects")
     notes = db.relationship("Note", back_populates="subject", cascade="all, delete-orphan")
     flashcard_decks = db.relationship("FlashcardDeck", back_populates="subject", cascade="all, delete-orphan")
+    exams = db.relationship("SubjectExam", back_populates="subject", cascade="all, delete-orphan")
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "name", name="uq_subject_user_name"),
@@ -125,4 +127,34 @@ class AskProfeMessage(db.Model):
 
     __table_args__ = (
         db.Index("ix_ask_profe_user_created", "user_id", "created_at"),
+    )
+
+
+class StudentProfile(db.Model):
+    __tablename__ = "student_profiles"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    student_name = db.Column(db.String(120), nullable=False)
+    age = db.Column(db.Integer, nullable=False)
+    personality_notes = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="profile")
+
+
+class SubjectExam(db.Model):
+    __tablename__ = "subject_exams"
+
+    id = db.Column(db.Integer, primary_key=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey("subjects.id"), nullable=False, index=True)
+    exam_date = db.Column(db.Date, nullable=False)
+    tema = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    subject = db.relationship("Subject", back_populates="exams")
+
+    __table_args__ = (
+        db.Index("ix_subject_exams_subject_date", "subject_id", "exam_date"),
+        db.UniqueConstraint("subject_id", "exam_date", "tema", name="uq_subject_exam"),
     )

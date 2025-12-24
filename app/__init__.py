@@ -22,7 +22,7 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import db, User, Subject, Note, FlashcardDeck, Job, AskProfeMessage
+from .models import db, User, Subject, Note, FlashcardDeck, Job, AskProfeMessage, StudentProfile, SubjectExam
 
 
 ALLOWED_EXTENSIONS = {"txt", "pdf"}
@@ -176,6 +176,24 @@ def prune_ask_profe_history(user_id: int, keep: int = 12) -> None:
     )
     for msg in extras:
         db.session.delete(msg)
+
+
+def is_setup_complete(user_id: int) -> bool:
+    if not user_id:
+        return False
+    profile = StudentProfile.query.filter_by(user_id=user_id).first()
+    if not profile:
+        return False
+    has_subject = Subject.query.filter_by(user_id=user_id).first()
+    if not has_subject:
+        return False
+    has_exam = (
+        db.session.query(SubjectExam.id)
+        .join(Subject, SubjectExam.subject_id == Subject.id)
+        .filter(Subject.user_id == user_id)
+        .first()
+    )
+    return has_exam is not None
 
 
 def allowed_file(filename: str) -> bool:
@@ -540,6 +558,17 @@ def create_app():
             return {"profe_busy": False}
         return {"profe_busy": profe_is_busy()}
 
+    @app.before_request
+    def enforce_setup_completion():
+        if not current_user.is_authenticated:
+            return None
+        endpoint = request.endpoint or ""
+        if endpoint in ("login", "register", "logout", "setup", "static"):
+            return None
+        if not is_setup_complete(current_user.id):
+            return redirect(url_for("setup"))
+        return None
+
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.get(int(user_id))
@@ -578,6 +607,8 @@ def create_app():
     @app.route("/", methods=["GET", "POST"])
     def login():
         if current_user.is_authenticated:
+            if not is_setup_complete(current_user.id):
+                return redirect(url_for("setup"))
             return redirect(url_for("dashboard"))
 
         if request.method == "POST":
@@ -589,6 +620,8 @@ def create_app():
                 login_user(user)
                 flash("Sesión iniciada ✅", "login_success")
                 session["just_logged_in"] = True
+                if not is_setup_complete(user.id):
+                    return redirect(url_for("setup"))
                 return redirect(url_for("dashboard"))
 
             flash("Usuario o contraseña incorrectos.", "error")
@@ -597,6 +630,8 @@ def create_app():
     @app.route("/register", methods=["GET", "POST"])
     def register():
         if current_user.is_authenticated:
+            if not is_setup_complete(current_user.id):
+                return redirect(url_for("setup"))
             return redirect(url_for("dashboard"))
 
         if request.method == "POST":
@@ -620,9 +655,173 @@ def create_app():
             flash("Cuenta creada e inicio de sesión ✅", "login_success")
             session["just_logged_in"] = True
             session["just_registered"] = True
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("setup"))
 
         return render_template("register.html")
+
+    @app.route("/setup", methods=["GET", "POST"])
+    @login_required
+    def setup():
+        if is_setup_complete(current_user.id):
+            return redirect(url_for("setup_next"))
+
+        student_name = ""
+        student_age = ""
+        personality_notes = ""
+        subjects_seed: list[dict] = []
+
+        if request.method == "POST":
+            student_name = (request.form.get("student_name") or "").strip()
+            student_age = (request.form.get("student_age") or "").strip()
+            personality_notes = (request.form.get("personality_notes") or "").strip()
+            subjects_payload = request.form.get("subjects_payload") or ""
+
+            errors: list[str] = []
+            if not student_name:
+                errors.append("Escribe el nombre del estudiante.")
+
+            age_val = None
+            try:
+                age_val = int(student_age)
+                if age_val < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append("Indica una edad válida.")
+
+            if not personality_notes:
+                errors.append("Añade detalles de personalidad para contextualizar al profe.")
+
+            subjects_clean: list[dict] = []
+            subjects_seed = []
+            if not subjects_payload:
+                errors.append("Añade al menos una asignatura con sus exámenes.")
+            else:
+                try:
+                    raw_subjects = json.loads(subjects_payload)
+                except (TypeError, ValueError):
+                    raw_subjects = None
+                    errors.append("No se pudo leer la lista de asignaturas.")
+
+                if raw_subjects is not None:
+                    if not isinstance(raw_subjects, list) or not raw_subjects:
+                        errors.append("Añade al menos una asignatura con sus exámenes.")
+                    else:
+                        seen_names: set[str] = set()
+                        for subj in raw_subjects:
+                            name = (subj.get("name") or "").strip() if isinstance(subj, dict) else ""
+                            exams = subj.get("exams") if isinstance(subj, dict) else []
+                            subject_seed = {"name": name, "exams": []}
+
+                            if not name:
+                                errors.append("Cada asignatura necesita un nombre.")
+                            lowered = name.lower()
+                            if name and lowered in seen_names:
+                                errors.append(f"La asignatura \"{name}\" está duplicada.")
+                            if name:
+                                seen_names.add(lowered)
+
+                            if not isinstance(exams, list) or not exams:
+                                errors.append(f"La asignatura \"{name or 'sin nombre'}\" necesita al menos un examen.")
+                            else:
+                                exam_entries: list[dict] = []
+                                for exam in exams:
+                                    date_str = (exam.get("date") or "").strip() if isinstance(exam, dict) else ""
+                                    tema = (exam.get("tema") or "").strip() if isinstance(exam, dict) else ""
+                                    subject_seed["exams"].append({"date": date_str, "tema": tema})
+                                    if not date_str or not tema:
+                                        errors.append(
+                                            f"Cada examen de \"{name or 'sin nombre'}\" debe tener fecha y tema."
+                                        )
+                                        continue
+                                    try:
+                                        exam_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                                    except ValueError:
+                                        errors.append(
+                                            f"Formato de fecha inválido en \"{name or 'sin nombre'}\": {date_str}."
+                                        )
+                                        continue
+                                    exam_entries.append({"date": exam_date, "tema": tema})
+                                if name and exam_entries:
+                                    subjects_clean.append({"name": name, "exams": exam_entries})
+
+                            subjects_seed.append(subject_seed)
+
+            if errors:
+                for err in errors:
+                    flash(err, "error")
+                return render_template(
+                    "setup.html",
+                    student_name=student_name,
+                    student_age=student_age,
+                    personality_notes=personality_notes,
+                    subjects_seed=subjects_seed,
+                )
+
+            try:
+                profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+                if profile:
+                    profile.student_name = student_name
+                    profile.age = age_val or 0
+                    profile.personality_notes = personality_notes
+                else:
+                    profile = StudentProfile(
+                        user_id=current_user.id,
+                        student_name=student_name,
+                        age=age_val or 0,
+                        personality_notes=personality_notes,
+                    )
+                    db.session.add(profile)
+
+                for subj in subjects_clean:
+                    subject = Subject.query.filter_by(user_id=current_user.id, name=subj["name"]).first()
+                    if not subject:
+                        subject = Subject(user_id=current_user.id, name=subj["name"])
+                        db.session.add(subject)
+                        db.session.flush()
+                    for exam in subj["exams"]:
+                        exists = SubjectExam.query.filter_by(
+                            subject_id=subject.id,
+                            exam_date=exam["date"],
+                            tema=exam["tema"],
+                        ).first()
+                        if not exists:
+                            db.session.add(
+                                SubjectExam(
+                                    subject_id=subject.id,
+                                    exam_date=exam["date"],
+                                    tema=exam["tema"],
+                                )
+                            )
+
+                db.session.commit()
+                flash("Configuración guardada ✅", "success")
+                return redirect(url_for("setup_next"))
+            except Exception:
+                db.session.rollback()
+                flash("Error guardando la configuración.", "error")
+                return render_template(
+                    "setup.html",
+                    student_name=student_name,
+                    student_age=student_age,
+                    personality_notes=personality_notes,
+                    subjects_seed=subjects_seed,
+                )
+
+        return render_template(
+            "setup.html",
+            student_name=student_name,
+            student_age=student_age,
+            personality_notes=personality_notes,
+            subjects_seed=subjects_seed,
+        )
+
+    @app.route("/setup/next")
+    @login_required
+    def setup_next():
+        if not is_setup_complete(current_user.id):
+            return redirect(url_for("setup"))
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        return render_template("setup_next.html", student_name=profile.student_name if profile else current_user.username)
 
     @app.route("/logout")
     @login_required
@@ -649,13 +848,20 @@ def create_app():
             return jsonify({"dates": []})
 
         rows = (
-            db.session.query(Note.exam_date)
-            .filter(Note.user_id == current_user.id, Note.subject_id == subject_id, Note.exam_date.isnot(None))
-            .distinct()
-            .order_by(Note.exam_date.asc())
+            db.session.query(SubjectExam.exam_date, SubjectExam.tema)
+            .filter(SubjectExam.subject_id == subject_id)
+            .order_by(SubjectExam.exam_date.asc(), SubjectExam.tema.asc())
             .all()
         )
-        return jsonify({"dates": [r[0].isoformat() for r in rows if r[0] is not None]})
+        return jsonify(
+            {
+                "dates": [
+                    {"date": r[0].isoformat(), "tema": r[1]}
+                    for r in rows
+                    if r[0] is not None and r[1]
+                ]
+            }
+        )
 
     # ---------- API: títulos por asignatura ----------
     @app.route("/api/titles")

@@ -48,7 +48,7 @@
       </div>
 
       <div>
-        <label for="exam_date_choice">Fecha de examen (existente para esa asignatura)</label>
+        <label for="exam_date_choice">Fecha de examen (según la configuración del alumno)</label>
         <select id="exam_date_choice" name="exam_date_choice">
           <option value="">(sin seleccionar)</option>
         </select>
@@ -129,10 +129,12 @@
       const resp = await fetch(`/api/exam-dates?subject_id=${encodeURIComponent(subjectId)}`);
       const data = await resp.json();
 
-      (data.dates || []).forEach(d => {
+      (data.dates || []).forEach(item => {
         const opt = document.createElement("option");
-        opt.value = d;
-        opt.textContent = d;
+        const dateValue = typeof item === "string" ? item : item.date;
+        const temaValue = typeof item === "string" ? "" : item.tema;
+        opt.value = dateValue;
+        opt.textContent = temaValue ? `${dateValue} — ${temaValue}` : dateValue;
         examSelect.appendChild(opt);
       });
     }

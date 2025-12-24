@@ -10,7 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from app import create_app
-from app.models import db, User, Subject, Note, Job, AskProfeMessage
+from app.models import db, User, Subject, Note, Job, AskProfeMessage, StudentProfile, SubjectExam
 
 
 @pytest.fixture
@@ -42,6 +42,27 @@ def register_user(client, username="ada", password="secret123"):
 def authed_client(flask_app):
     client = flask_app.test_client()
     register_user(client)
+    with flask_app.app_context():
+        user = User.query.filter_by(username="ada").first()
+        db.session.add(
+            StudentProfile(
+                user_id=user.id,
+                student_name="Ada Lovelace",
+                age=17,
+                personality_notes="Curiosa y metódica.",
+            )
+        )
+        subject = Subject(user_id=user.id, name="Matemáticas")
+        db.session.add(subject)
+        db.session.flush()
+        db.session.add(
+            SubjectExam(
+                subject_id=subject.id,
+                exam_date=date(2024, 10, 1),
+                tema="Álgebra",
+            )
+        )
+        db.session.commit()
     return client
 
 
