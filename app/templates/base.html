@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}App{% endblock %}</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=8">
   </head>
 
   <body data-just-logged-in="{{ '1' if just_logged_in else '' }}" data-just-registered="{{ '1' if just_registered else '' }}" data-profe-busy="{{ '1' if profe_busy else '' }}" data-page="{{ request.endpoint or '' }}">
@@ -47,21 +47,33 @@
     {% endif %}
 
     {% if current_user.is_authenticated %}
-      <div class="mascot" id="mascot-root" aria-hidden="true">
-        <div class="mascot__bubble" data-mascot-bubble hidden></div>
-        <div class="mascot__card" data-mascot-card hidden>
-          <p data-mascot-card-text></p>
+      <div class="mascot-wrap" data-mascot-wrap>
+        <div class="mascot" id="mascot-root" aria-hidden="true">
+          <div class="mascot__bubble" data-mascot-bubble hidden></div>
+          <div class="mascot__card" data-mascot-card hidden>
+            <p data-mascot-card-text></p>
+          </div>
+          <div class="mascot__sprite">
+            <img data-mascot-img src="{{ url_for('static', filename='img/mascot/idle1.gif') }}" alt="Mascota" />
+          </div>
         </div>
-        <div class="mascot__sprite">
-          <img data-mascot-img src="{{ url_for('static', filename='img/mascot/idle1.gif') }}" alt="Mascota" />
-        </div>
+        <button
+          type="button"
+          class="mascot-toggle"
+          data-mascot-toggle
+          data-label-show="Mostrar mascota"
+          data-label-hide="Ocultar mascota"
+          aria-pressed="false"
+        >
+          Ocultar mascota
+        </button>
       </div>
     {% endif %}
 
     <!--defer + cache busting -->
     <script defer src="{{ url_for('static', filename='js/nav.js') }}?v=1"></script>
     {% if current_user.is_authenticated %}
-      <script defer src="{{ url_for('static', filename='js/mascot.js') }}?v=8"></script>
+      <script defer src="{{ url_for('static', filename='js/mascot.js') }}?v=11"></script>
     {% endif %}
   </body>
 </html>

@@ -1,5 +1,7 @@
 (function () {
   const root = document.getElementById("mascot-root");
+  const toggle = document.querySelector("[data-mascot-toggle]");
+  const storageKey = "mascotHidden";
   if (!root) return;
   const justLoggedIn = (document.body.dataset.justLoggedIn || "") === "1";
   const justRegistered = (document.body.dataset.justRegistered || "") === "1";
@@ -47,9 +49,40 @@
   let currentAction = null;
   let hideTimer = null;
   let currentTip = null; // "bubble" | "card" | null
+  let jobTimer = null;
+  let profeNoticeTimer = null;
+  let loginHandled = false;
+  let isHidden = false;
 
   function pick(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function readHiddenPreference() {
+    try {
+      return window.localStorage.getItem(storageKey) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function writeHiddenPreference(hidden) {
+    try {
+      window.localStorage.setItem(storageKey, hidden ? "1" : "0");
+    } catch (e) {
+      // ignore storage errors
+    }
+  }
+
+  function syncToggle(hidden) {
+    if (!toggle) return;
+    const showLabel = toggle.dataset.labelShow || "Mostrar mascota";
+    const hideLabel = toggle.dataset.labelHide || "Ocultar mascota";
+    const label = hidden ? showLabel : hideLabel;
+    toggle.textContent = label;
+    toggle.setAttribute("aria-pressed", hidden ? "true" : "false");
+    toggle.classList.toggle("is-hidden", hidden);
+    toggle.title = label;
   }
 
   function hideTip() {
@@ -121,6 +154,7 @@
 
   function trigger(action, opts = {}) {
     if (!img) return;
+    if (isHidden) return;
     if (currentAction) return; // evita solapado de acciones
     const src = actions[action];
     if (!src) return;
@@ -154,7 +188,8 @@
   function scheduleProfeBusyNotice(triesLeft = 20, delay = 1200) {
     if (!profeBusy || currentPage !== "dashboard") return;
     if (triesLeft <= 0) return;
-    setTimeout(() => {
+    if (profeNoticeTimer) clearTimeout(profeNoticeTimer);
+    profeNoticeTimer = setTimeout(() => {
       if (currentAction || currentTip) {
         scheduleProfeBusyNotice(triesLeft - 1, 1500);
         return;
@@ -168,11 +203,69 @@
     }, delay);
   }
 
+  function stopMascot() {
+    if (idleTimer) {
+      clearInterval(idleTimer);
+      idleTimer = null;
+    }
+    if (tipTimer) {
+      clearTimeout(tipTimer);
+      tipTimer = null;
+    }
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    if (revertTimer) {
+      clearTimeout(revertTimer);
+      revertTimer = null;
+    }
+    if (jobTimer) {
+      clearInterval(jobTimer);
+      jobTimer = null;
+    }
+    if (profeNoticeTimer) {
+      clearTimeout(profeNoticeTimer);
+      profeNoticeTimer = null;
+    }
+    hideTip();
+    currentAction = null;
+  }
+
+  function startMascot() {
+    startIdleLoop();
+    scheduleTip();
+    if (!loginHandled) {
+      detectLoginSuccess();
+      loginHandled = true;
+    }
+    scheduleProfeBusyNotice();
+    pollJobUpdates();
+    if (!jobTimer) {
+      jobTimer = setInterval(pollJobUpdates, 8000);
+    }
+  }
+
+  function applyHiddenState(hidden) {
+    isHidden = hidden;
+    root.hidden = hidden;
+    syncToggle(hidden);
+    if (img) {
+      img.hidden = hidden;
+    }
+    if (hidden) {
+      stopMascot();
+    } else {
+      startMascot();
+    }
+  }
+
   async function pollJobUpdates() {
     try {
       const resp = await fetch("/api/jobs/updates");
       if (!resp.ok) return;
       const data = await resp.json();
+      if (isHidden) return;
       (data.jobs || []).forEach((j) => {
         hideTip();
         const tone = j.status === "success" ? "success" : "error";
@@ -188,19 +281,23 @@
     }
   }
 
-  // Start loops
-  startIdleLoop();
-  scheduleTip();
-  detectLoginSuccess();
-  scheduleProfeBusyNotice();
-  pollJobUpdates();
-  setInterval(pollJobUpdates, 8000);
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const nextHidden = !isHidden;
+      applyHiddenState(nextHidden);
+      writeHiddenPreference(nextHidden);
+    });
+  }
+
+  const initialHidden = toggle ? readHiddenPreference() : false;
+  applyHiddenState(initialHidden);
 
   // Permitir que el usuario moleste a la mascota
   if (root && img) {
     root.addEventListener("click", (e) => {
       // evita que otros clics de la UI burbujeen
       e.stopPropagation();
+      if (isHidden) return;
       if (currentAction) return;
       const angry = pick(angrySprites);
       if (angry) {
@@ -213,12 +310,9 @@
   // Pause loops when tab hidden to save CPU
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      if (idleTimer) clearInterval(idleTimer);
-      if (tipTimer) clearTimeout(tipTimer);
-      if (hideTimer) clearTimeout(hideTimer);
-    } else {
-      startIdleLoop();
-      scheduleTip();
+      stopMascot();
+    } else if (!isHidden) {
+      startMascot();
     }
   });
 })();
