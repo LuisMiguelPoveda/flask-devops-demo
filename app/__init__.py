@@ -108,8 +108,9 @@ def simple_format_note(text: str) -> Markup:
     Soporta **negrita** y *cursiva*. Escapa contenido para evitar XSS.
     """
     import re
+    from html import unescape as html_unescape
 
-    lines = (text or "").splitlines()
+    lines = html_unescape(text or "").splitlines()
     html_parts = []
     in_list = False
 
