@@ -84,6 +84,7 @@
       const temaInput = examEl.querySelector("[data-exam-tema]");
       const removeBtn = examEl.querySelector("[data-remove-exam]");
 
+      if (data.id) examEl.dataset.examId = data.id;
       if (data.date) dateInput.value = data.date;
       if (data.tema) temaInput.value = data.tema;
 
@@ -102,6 +103,7 @@
       const addExamBtn = subjectEl.querySelector("[data-add-exam]");
       const removeSubjectBtn = subjectEl.querySelector("[data-remove-subject]");
 
+      if (data.id) subjectEl.dataset.subjectId = data.id;
       if (data.name) nameInput.value = data.name;
 
       addExamBtn.addEventListener("click", () => addExam(examsRoot));
@@ -125,13 +127,19 @@
         const subjects = [];
         subjectsRoot.querySelectorAll("[data-subject]").forEach((subjectEl) => {
           const name = subjectEl.querySelector("[data-subject-name]").value.trim();
+          const subjectId = subjectEl.dataset.subjectId;
           const exams = [];
           subjectEl.querySelectorAll("[data-exam]").forEach((examEl) => {
             const date = examEl.querySelector("[data-exam-date]").value;
             const tema = examEl.querySelector("[data-exam-tema]").value.trim();
-            exams.push({ date, tema });
+            const examId = examEl.dataset.examId;
+            const payload = { date, tema };
+            if (examId) payload.id = Number(examId);
+            exams.push(payload);
           });
-          subjects.push({ name, exams });
+          const subjectPayload = { name, exams };
+          if (subjectId) subjectPayload.id = Number(subjectId);
+          subjects.push(subjectPayload);
         });
         payloadInput.value = JSON.stringify(subjects);
       });

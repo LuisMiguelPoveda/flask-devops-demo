@@ -8,7 +8,7 @@
 
     <p>Opciones:</p>
     <ul>
-      <li><strong>IA (TXT/PDF):</strong> subes un .txt o .pdf y se generan apuntes con el modelo.</li>
+      <li><strong>IA (TXT/PDF/PPTX):</strong> subes un .txt, .pdf o .pptx y se generan apuntes con el modelo.</li>
       <li><strong>Manual:</strong> escribes el contenido y se guarda tal cual (sin IA).</li>
     </ul>
 
@@ -68,7 +68,7 @@
 
       <div class="check-row">
         <input type="checkbox" id="manual_file_mode" name="manual_file_mode" />
-        <label for="manual_file_mode" style="margin:0;">Guardar archivo TXT sin IA</label>
+        <label for="manual_file_mode" style="margin:0;">No procesar apuntes con IA</label>
       </div>
 
       <div id="manual-wrap" style="display:none;">
@@ -77,8 +77,14 @@
       </div>
 
       <div id="file-wrap">
-        <label for="file">Archivo TXT o PDF</label>
-        <input id="file" name="file" type="file" accept=".txt,text/plain,application/pdf" multiple />
+        <label for="file">Archivo TXT, PDF o PPTX</label>
+        <input
+          id="file"
+          name="file"
+          type="file"
+          accept=".txt,text/plain,application/pdf,.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          multiple
+        />
       </div>
 
       <button type="submit" id="submit-btn">Guardar</button>

@@ -7,6 +7,7 @@
     const mapped = parts.map((part) => {
       if (part === "text/plain") return ".txt";
       if (part === "application/pdf") return ".pdf";
+      if (part === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return ".pptx";
       return part;
     });
     return Array.from(new Set(mapped)).join(", ");

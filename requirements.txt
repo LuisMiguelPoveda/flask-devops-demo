@@ -4,3 +4,4 @@ Flask-SQLAlchemy
 Flask-Login
 requests
 PyPDF2
+python-pptx

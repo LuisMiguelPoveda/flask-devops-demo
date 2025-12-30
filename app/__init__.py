@@ -16,6 +16,7 @@ from markupsafe import Markup, escape
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
+from pptx import Presentation
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
@@ -45,8 +46,8 @@ from .models import (
 )
 
 
-ALLOWED_EXTENSIONS = {"txt", "pdf"}
-# Permitimos hasta ~50 MB por archivo para PDFs grandes
+ALLOWED_EXTENSIONS = {"txt", "pdf", "pptx"}
+# Permitimos hasta ~50 MB por archivo
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
 FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
@@ -279,6 +280,24 @@ def extract_pdf_text(file_bytes: bytes) -> str:
     return "\n".join(chunks)
 
 
+def extract_pptx_text(file_bytes: bytes) -> str:
+    """Extrae texto simple desde PPTX usando python-pptx."""
+    prs = Presentation(BytesIO(file_bytes))
+    chunks: list[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                text = shape.text_frame.text or ""
+                if text.strip():
+                    chunks.append(text.strip())
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    row_text = " ".join(cell.text.strip() for cell in row.cells if cell.text)
+                    if row_text:
+                        chunks.append(row_text)
+    return "\n".join(chunks)
+
+
 def fetch_models(app):
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     try:
@@ -469,10 +488,17 @@ def process_job(app, job: Job):
                         return "error", None, "El archivo está vacío."
 
                     ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
-                    file_mime = content_type or ("application/pdf" if ext == "pdf" else "text/plain")
                     if ext == "pdf":
+                        file_mime = content_type or "application/pdf"
                         file_text = extract_pdf_text(file_bytes)
+                    elif ext == "pptx":
+                        file_mime = (
+                            content_type
+                            or "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        )
+                        file_text = extract_pptx_text(file_bytes)
                     else:
+                        file_mime = content_type or "text/plain"
                         try:
                             file_text = file_bytes.decode("utf-8")
                         except UnicodeDecodeError:
@@ -1060,19 +1086,33 @@ def create_app():
                     for subj in raw_subjects:
                         if not isinstance(subj, dict):
                             continue
+                        raw_subject_id = subj.get("id")
+                        subject_id = None
+                        if raw_subject_id is not None:
+                            try:
+                                subject_id = int(raw_subject_id)
+                            except (TypeError, ValueError):
+                                subject_id = None
                         name = (subj.get("name") or "").strip()
                         exams = subj.get("exams") if isinstance(subj, dict) else []
                         if not isinstance(exams, list):
                             exams = []
-                        subject_seed = {"name": name, "exams": []}
+                        subject_seed = {"id": subject_id, "name": name, "exams": []}
 
                         subject_has_content = bool(name)
                         for exam in exams:
+                            raw_exam_id = exam.get("id") if isinstance(exam, dict) else None
+                            exam_id = None
+                            if raw_exam_id is not None:
+                                try:
+                                    exam_id = int(raw_exam_id)
+                                except (TypeError, ValueError):
+                                    exam_id = None
                             date_str = (exam.get("date") or "").strip() if isinstance(exam, dict) else ""
                             tema = (exam.get("tema") or "").strip() if isinstance(exam, dict) else ""
                             if date_str or tema:
                                 subject_has_content = True
-                            subject_seed["exams"].append({"date": date_str, "tema": tema})
+                            subject_seed["exams"].append({"id": exam_id, "date": date_str, "tema": tema})
 
                         if not subject_has_content:
                             continue
@@ -1089,7 +1129,15 @@ def create_app():
                         seen_names.add(lowered)
 
                         exam_entries: list[dict] = []
+                        seen_exam_keys: set[tuple] = set()
                         for exam in exams:
+                            raw_exam_id = exam.get("id") if isinstance(exam, dict) else None
+                            exam_id = None
+                            if raw_exam_id is not None:
+                                try:
+                                    exam_id = int(raw_exam_id)
+                                except (TypeError, ValueError):
+                                    exam_id = None
                             date_str = (exam.get("date") or "").strip() if isinstance(exam, dict) else ""
                             tema = (exam.get("tema") or "").strip() if isinstance(exam, dict) else ""
                             if not date_str and not tema:
@@ -1106,39 +1154,97 @@ def create_app():
                                     f"Formato de fecha inválido en \"{name}\": {date_str}."
                                 )
                                 continue
-                            exam_entries.append({"date": exam_date, "tema": tema})
+                            exam_key = (exam_date, tema.lower())
+                            if exam_key in seen_exam_keys:
+                                errors.append(
+                                    f"El examen \"{tema}\" de \"{name}\" está duplicado."
+                                )
+                                continue
+                            seen_exam_keys.add(exam_key)
+                            exam_entries.append({"id": exam_id, "date": exam_date, "tema": tema})
 
-                        subjects_clean.append({"name": name, "exams": exam_entries})
+                        subjects_clean.append({"id": subject_id, "name": name, "exams": exam_entries})
 
             if errors:
                 for err in errors:
                     flash(err, "error")
                 return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
-            if not subjects_clean:
-                return redirect(url_for("setup_generate"))
-
             try:
+                existing_subjects = Subject.query.filter_by(user_id=current_user.id).all()
+                existing_subjects_by_id = {s.id: s for s in existing_subjects}
+                incoming_subject_ids: set[int] = set()
+
+                def delete_exam_content(subject_id: int, exam_date):
+                    note_ids = [
+                        row[0]
+                        for row in db.session.query(Note.id)
+                        .filter_by(user_id=current_user.id, subject_id=subject_id, exam_date=exam_date)
+                        .all()
+                    ]
+                    if note_ids:
+                        NoteSourceFile.query.filter(NoteSourceFile.note_id.in_(note_ids)).delete(
+                            synchronize_session=False
+                        )
+                    Note.query.filter_by(
+                        user_id=current_user.id, subject_id=subject_id, exam_date=exam_date
+                    ).delete(synchronize_session=False)
+                    FlashcardDeck.query.filter_by(
+                        user_id=current_user.id, subject_id=subject_id, exam_date=exam_date
+                    ).delete(synchronize_session=False)
+
                 for subj in subjects_clean:
-                    subject = Subject.query.filter_by(user_id=current_user.id, name=subj["name"]).first()
-                    if not subject:
+                    subject_id = subj.get("id")
+                    subject = existing_subjects_by_id.get(subject_id) if subject_id else None
+                    if subject:
+                        subject.name = subj["name"]
+                    else:
                         subject = Subject(user_id=current_user.id, name=subj["name"])
                         db.session.add(subject)
                         db.session.flush()
+                    incoming_subject_ids.add(subject.id)
+
+                    existing_exams = {e.id: e for e in SubjectExam.query.filter_by(subject_id=subject.id).all()}
+                    incoming_exam_ids: set[int] = set()
+
                     for exam in subj["exams"]:
-                        exists = SubjectExam.query.filter_by(
-                            subject_id=subject.id,
-                            exam_date=exam["date"],
-                            tema=exam["tema"],
-                        ).first()
-                        if not exists:
-                            db.session.add(
-                                SubjectExam(
+                        exam_id = exam.get("id")
+                        if exam_id and exam_id in existing_exams:
+                            exam_row = existing_exams[exam_id]
+                            old_date = exam_row.exam_date
+                            exam_row.exam_date = exam["date"]
+                            exam_row.tema = exam["tema"]
+                            incoming_exam_ids.add(exam_row.id)
+                            if old_date != exam_row.exam_date:
+                                Note.query.filter_by(
+                                    user_id=current_user.id,
                                     subject_id=subject.id,
-                                    exam_date=exam["date"],
-                                    tema=exam["tema"],
-                                )
+                                    exam_date=old_date,
+                                ).update({Note.exam_date: exam_row.exam_date}, synchronize_session=False)
+                                FlashcardDeck.query.filter_by(
+                                    user_id=current_user.id,
+                                    subject_id=subject.id,
+                                    exam_date=old_date,
+                                ).update({FlashcardDeck.exam_date: exam_row.exam_date}, synchronize_session=False)
+                        else:
+                            new_exam = SubjectExam(
+                                subject_id=subject.id,
+                                exam_date=exam["date"],
+                                tema=exam["tema"],
                             )
+                            db.session.add(new_exam)
+                            db.session.flush()
+                            incoming_exam_ids.add(new_exam.id)
+
+                    for exam_id, exam_row in existing_exams.items():
+                        if exam_id not in incoming_exam_ids:
+                            delete_exam_content(subject.id, exam_row.exam_date)
+                            db.session.delete(exam_row)
+
+                for subject in existing_subjects:
+                    if subject.id not in incoming_subject_ids:
+                        db.session.delete(subject)
+
                 db.session.commit()
                 flash("Asignaturas guardadas ✅", "success")
                 return redirect(url_for("setup_generate"))
@@ -1147,6 +1253,33 @@ def create_app():
                 flash("Error guardando las asignaturas.", "error")
                 return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
+        if request.method == "GET":
+            subjects = (
+                Subject.query.filter_by(user_id=current_user.id)
+                .order_by(Subject.name.asc())
+                .all()
+            )
+            subjects_seed = []
+            for subject in subjects:
+                exams = (
+                    SubjectExam.query.filter_by(subject_id=subject.id)
+                    .order_by(SubjectExam.exam_date.asc(), SubjectExam.tema.asc())
+                    .all()
+                )
+                subjects_seed.append(
+                    {
+                        "id": subject.id,
+                        "name": subject.name,
+                        "exams": [
+                            {
+                                "id": exam.id,
+                                "date": exam.exam_date.isoformat() if exam.exam_date else "",
+                                "tema": exam.tema,
+                            }
+                            for exam in exams
+                        ],
+                    }
+                )
         return render_template("setup_subjects.html", subjects_seed=subjects_seed)
 
     @app.route("/setup/generate", methods=["GET", "POST"])
@@ -1193,7 +1326,7 @@ def create_app():
                                 continue
                             total_files += 1
                             if not allowed_file(upload.filename):
-                                errors.append(f"{upload.filename}: solo se permiten archivos .txt o .pdf.")
+                                errors.append(f"{upload.filename}: solo se permiten archivos .txt, .pdf o .pptx.")
                                 continue
 
                             filename = secure_filename(upload.filename)
@@ -1656,7 +1789,7 @@ def create_app():
             if uploads:
                 for upload in uploads:
                     if not allowed_file(upload.filename):
-                        flash("Solo se permiten archivos .txt o .pdf.", "error")
+                        flash("Solo se permiten archivos .txt, .pdf o .pptx.", "error")
                         return redirect(url_for("add_notes"))
                     filename = secure_filename(upload.filename)
                     file_bytes = upload.read()
@@ -1667,10 +1800,17 @@ def create_app():
                         flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
                         return redirect(url_for("add_notes"))
                     ext = filename.rsplit(".", 1)[1].lower()
-                    file_mime = upload.mimetype or ("application/pdf" if ext == "pdf" else "text/plain")
                     if ext == "pdf":
+                        file_mime = upload.mimetype or "application/pdf"
                         file_text = extract_pdf_text(file_bytes)
+                    elif ext == "pptx":
+                        file_mime = (
+                            upload.mimetype
+                            or "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        )
+                        file_text = extract_pptx_text(file_bytes)
                     else:
+                        file_mime = upload.mimetype or "text/plain"
                         try:
                             file_text = file_bytes.decode("utf-8")
                         except UnicodeDecodeError:
@@ -1699,7 +1839,7 @@ def create_app():
             content_text = manual_text if manual_text else combined_text
             if manual_mode or manual_file_mode:
                 if not content_text:
-                    flash("Si eliges guardar sin IA, sube un TXT o escribe contenido.", "error")
+                    flash("Si eliges guardar sin IA, sube un TXT/PDF/PPTX o escribe contenido.", "error")
                     return redirect(url_for("add_notes"))
                 # default title: nombre de archivo sin extensión + " examen " + fecha + " creado " + fecha de subida
                 if title.strip():
@@ -1724,7 +1864,7 @@ def create_app():
                 return redirect(url_for("dashboard"))
 
             if not file_texts:
-                flash("Para usar IA sube un TXT o PDF válido.", "error")
+                flash("Para usar IA sube un TXT, PDF o PPTX válido.", "error")
                 return redirect(url_for("add_notes"))
 
             if title.strip():
