@@ -35,3 +35,15 @@ details[open]>.details-toggle::after{content:"-"}
 .profe-timer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(15,23,42,.18);background:rgba(15,23,42,.06);color:#0f172a;font-weight:700}
 .profe-timer__label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:rgba(15,23,42,.68)}
 .profe-timer__value{font-size:18px;padding:4px 10px;border-radius:999px;background:rgba(15,23,42,.12)}
+.file-drop{display:grid;gap:8px}
+.file-drop__input{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.file-drop__zone{padding:12px;border-radius:14px;border:2px dashed rgba(15,23,42,.22);background:rgba(255,255,255,.85);cursor:pointer;user-select:none;-webkit-user-select:none}
+.file-drop__zone.is-dragover{border-color:rgba(59,130,246,.7);background:rgba(59,130,246,.08)}
+.file-drop__zone:focus-visible{outline:2px solid rgba(59,130,246,.7);outline-offset:2px}
+.file-drop__title{display:block;font-weight:700;color:#0f172a}
+.file-drop__meta{display:block;margin-top:4px;font-size:12px;color:rgba(15,23,42,.7)}
+.file-drop__list{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.file-drop__item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(15,23,42,.04);border:1px solid rgba(15,23,42,.12);user-select:none;-webkit-user-select:none}
+.file-drop__name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-drop__remove{padding:6px 10px;border-radius:999px;border:1px solid rgba(220,38,38,.4);background:rgba(220,38,38,.12);color:#991b1b;font-weight:700}
+.file-drop__remove:hover{background:rgba(220,38,38,.2)}

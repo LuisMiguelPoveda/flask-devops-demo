@@ -486,17 +486,20 @@ def process_job(app, job: Job):
 
                     exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
                     base_name = Path(filename).stem if filename else subject.name
-                    title = f"{exam.tema} - {base_name}".strip(" -")
+                    note_title = f"{exam.tema} - {base_name}".strip(" -")
                     if exam_date_str != "No indicada":
-                        title = f"{title} ({exam_date_str})"
+                        note_title = f"{note_title} ({exam_date_str})"
+                    deck_title = exam.tema
+                    if exam_date_str != "No indicada":
+                        deck_title = f"{deck_title} ({exam_date_str})"
 
                     note = Note(
                         user_id=user_id,
                         subject_id=subject.id,
-                        title=title,
+                        title=note_title,
                         exam_date=exam.exam_date,
                         original_filename=filename,
-                        content=f"{title}\n\n",
+                        content=f"{note_title}\n\n",
                         ai_used=True,
                     )
                     db.session.add(note)
@@ -510,16 +513,23 @@ def process_job(app, job: Job):
                         )
                     )
 
-                    deck = FlashcardDeck(
+                    deck = FlashcardDeck.query.filter_by(
                         user_id=user_id,
                         subject_id=subject.id,
-                        title=title,
                         exam_date=exam.exam_date,
-                        source_note_id=note.id,
-                        flashcards=[],
-                    )
-                    db.session.add(deck)
-                    db.session.flush()
+                        title=deck_title,
+                    ).first()
+                    if not deck:
+                        deck = FlashcardDeck(
+                            user_id=user_id,
+                            subject_id=subject.id,
+                            title=deck_title,
+                            exam_date=exam.exam_date,
+                            source_note_id=note.id,
+                            flashcards=[],
+                        )
+                        db.session.add(deck)
+                        db.session.flush()
 
                     for idx, chunk in enumerate(chunks):
                         db.session.add(
@@ -530,7 +540,7 @@ def process_job(app, job: Job):
                                     "user_id": user_id,
                                     "subject_id": subject.id,
                                     "note_id": note.id,
-                                    "title": title,
+                                    "title": note_title,
                                     "exam_date": exam_date_str,
                                     "filename": filename or "input.txt",
                                     "text": chunk,
@@ -549,7 +559,7 @@ def process_job(app, job: Job):
                                     "note_id": note.id,
                                     "deck_id": deck.id,
                                     "model": model,
-                                    "count": 6,
+                                    "count": FLASHCARD_CHUNK_DEFAULT,
                                     "chunk_index": idx,
                                     "total_chunks": len(chunks),
                                     "text": chunk,
@@ -1637,39 +1647,56 @@ def create_app():
             manual_mode = request.form.get("manual_mode") == "on"
             manual_file_mode = request.form.get("manual_file_mode") == "on"
 
-            upload = request.files.get("file")
-            file_text = ""
-            file_bytes = None
-            file_mime = None
-            if upload and upload.filename:
-                if not allowed_file(upload.filename):
-                    flash("Solo se permiten archivos .txt o .pdf.", "error")
-                    return redirect(url_for("add_notes"))
-                filename = secure_filename(upload.filename)
-                file_bytes = upload.read()
-                if not file_bytes:
-                    flash("El archivo está vacío.", "error")
-                    return redirect(url_for("add_notes"))
-                if len(file_bytes) > MAX_UPLOAD_BYTES:
-                    flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
-                    return redirect(url_for("add_notes"))
-                ext = filename.rsplit(".", 1)[1].lower()
-                file_mime = upload.mimetype or ("application/pdf" if ext == "pdf" else "text/plain")
-                if ext == "pdf":
-                    file_text = extract_pdf_text(file_bytes)
-                else:
-                    try:
-                        file_text = file_bytes.decode("utf-8")
-                    except UnicodeDecodeError:
-                        file_text = file_bytes.decode("utf-8", errors="ignore")
-                file_text = (file_text or "").strip()
-                if not file_text:
-                    flash("El archivo no contiene texto legible.", "error")
-                    return redirect(url_for("add_notes"))
+            uploads = [u for u in request.files.getlist("file") if u and u.filename]
+            file_texts: list[str] = []
+            filenames: list[str] = []
+            source_bytes = None
+            source_mime = None
+            source_filename = None
+            if uploads:
+                for upload in uploads:
+                    if not allowed_file(upload.filename):
+                        flash("Solo se permiten archivos .txt o .pdf.", "error")
+                        return redirect(url_for("add_notes"))
+                    filename = secure_filename(upload.filename)
+                    file_bytes = upload.read()
+                    if not file_bytes:
+                        flash("El archivo está vacío.", "error")
+                        return redirect(url_for("add_notes"))
+                    if len(file_bytes) > MAX_UPLOAD_BYTES:
+                        flash(f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB.", "error")
+                        return redirect(url_for("add_notes"))
+                    ext = filename.rsplit(".", 1)[1].lower()
+                    file_mime = upload.mimetype or ("application/pdf" if ext == "pdf" else "text/plain")
+                    if ext == "pdf":
+                        file_text = extract_pdf_text(file_bytes)
+                    else:
+                        try:
+                            file_text = file_bytes.decode("utf-8")
+                        except UnicodeDecodeError:
+                            file_text = file_bytes.decode("utf-8", errors="ignore")
+                    file_text = (file_text or "").strip()
+                    if not file_text:
+                        flash("El archivo no contiene texto legible.", "error")
+                        return redirect(url_for("add_notes"))
+                    file_texts.append(file_text)
+                    filenames.append(filename)
+                    if len(uploads) == 1:
+                        source_bytes = file_bytes
+                        source_mime = file_mime
+                        source_filename = filename
+                combined_text = "\n\n".join(file_texts)
+                if len(uploads) > 1:
+                    source_filename = "archivos_combinados.txt"
+                    source_bytes = combined_text.encode("utf-8")
+                    source_mime = "text/plain"
             else:
+                combined_text = ""
                 filename = None
 
-            content_text = manual_text if manual_text else file_text
+            filename = source_filename if uploads else None
+
+            content_text = manual_text if manual_text else combined_text
             if manual_mode or manual_file_mode:
                 if not content_text:
                     flash("Si eliges guardar sin IA, sube un TXT o escribe contenido.", "error")
@@ -1696,7 +1723,7 @@ def create_app():
                 flash("Apuntes guardados (sin IA) ✅", "success")
                 return redirect(url_for("dashboard"))
 
-            if not file_text:
+            if not file_texts:
                 flash("Para usar IA sube un TXT o PDF válido.", "error")
                 return redirect(url_for("add_notes"))
 
@@ -1708,7 +1735,9 @@ def create_app():
                 exam_part = exam_date.isoformat() if exam_date else ""
                 final_title = f"{base_name} examen {exam_part} creado {created_str} ({selected_model})".strip()
             exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
-            chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
+            chunks = []
+            for text in file_texts:
+                chunks.extend(chunk_text_with_overlap(text, max_tokens=3000, overlap=500))
             if not chunks:
                 flash("No se pudo dividir el texto en fragmentos para IA.", "error")
                 return redirect(url_for("add_notes"))
@@ -1724,13 +1753,13 @@ def create_app():
             )
             db.session.add(note)
             db.session.flush()
-            if file_bytes:
+            if source_bytes:
                 db.session.add(
                     NoteSourceFile(
                         note_id=note.id,
                         filename=filename or "input.txt",
-                        content_type=file_mime or "application/octet-stream",
-                        data=file_bytes,
+                        content_type=source_mime or "application/octet-stream",
+                        data=source_bytes,
                     )
                 )
             db.session.commit()
