@@ -5,6 +5,7 @@ import threading
 import math
 import tempfile
 import fcntl
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from io import BytesIO
@@ -12,8 +13,12 @@ from io import BytesIO
 import requests
 from requests.exceptions import Timeout, RequestException
 from markupsafe import Markup, escape
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
 from flask_login import (
@@ -41,10 +46,11 @@ from .models import (
 
 
 ALLOWED_EXTENSIONS = {"txt", "pdf"}
-# Permitimos hasta ~5 MB para poder subir PDFs grandes
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024
-# Límite de texto razonable para evitar desbordar la memoria
-MAX_TEXT_CHARS = 300_000
+# Permitimos hasta ~50 MB por archivo para PDFs grandes
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
+FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
+LLM_OFFLINE_LABEL = "Motor LLM no encontrado"
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
 _worker_lock_handle = None
@@ -208,6 +214,8 @@ def fetch_tema_options(user_id: int, subject_id: int | None = None) -> list[str]
 
 
 def resolve_default_model(app, user_id: int | None, available_models: list[str] | None = None) -> str:
+    if available_models and len(available_models) == 1 and available_models[0] == LLM_OFFLINE_LABEL:
+        return LLM_OFFLINE_LABEL
     model = app.config["LMSTUDIO_MODEL"]
     if user_id:
         profile = StudentProfile.query.filter_by(user_id=user_id).first()
@@ -227,6 +235,34 @@ def is_setup_complete(user_id: int) -> bool:
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def save_upload_stream(upload, dest_path: str, max_bytes: int) -> tuple[int, str | None]:
+    total = 0
+    try:
+        with open(dest_path, "wb") as handle:
+            while True:
+                chunk = upload.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    break
+                handle.write(chunk)
+    except Exception:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise
+
+    if total == 0:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        return 0, "empty"
+    if total > max_bytes:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        return total, "too_large"
+    return total, None
 
 
 def extract_pdf_text(file_bytes: bytes) -> str:
@@ -251,9 +287,9 @@ def fetch_models(app):
         data = resp.json()
         all_ids = [m["id"] for m in data.get("data", [])]
         models = [mid for mid in all_ids if not mid.startswith("text-embedding-")]
-        return models or [app.config["LMSTUDIO_MODEL"]]
+        return models or [LLM_OFFLINE_LABEL]
     except Exception:
-        return [app.config["LMSTUDIO_MODEL"]]
+        return [LLM_OFFLINE_LABEL]
 
 
 def lmstudio_chat(app, model: str, messages: list[dict], response_format: dict | None = None, temperature: float = 0.4) -> str:
@@ -400,6 +436,132 @@ def process_job(app, job: Job):
     """
     with app.app_context():
         try:
+            if job.type == "file_import":
+                payload = job.payload or {}
+                user_id = payload.get("user_id")
+                subject_id = payload.get("subject_id")
+                exam_id = payload.get("exam_id")
+                filename = payload.get("filename") or "input.txt"
+                file_path = payload.get("file_path") or ""
+                content_type = payload.get("content_type") or ""
+                model = payload.get("model") or app.config["LMSTUDIO_MODEL"]
+
+                if not file_path or not os.path.exists(file_path):
+                    return "error", None, "Archivo subido no encontrado."
+
+                try:
+                    subject = Subject.query.filter_by(id=subject_id, user_id=user_id).first()
+                    if not subject:
+                        return "error", None, "Asignatura inválida para el archivo."
+                    exam = SubjectExam.query.filter_by(id=exam_id, subject_id=subject.id).first()
+                    if not exam:
+                        return "error", None, "Examen inválido para el archivo."
+
+                    file_size = os.path.getsize(file_path)
+                    if file_size == 0:
+                        return "error", None, "El archivo está vacío."
+                    if file_size > MAX_UPLOAD_BYTES:
+                        return "error", None, f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB."
+
+                    with open(file_path, "rb") as handle:
+                        file_bytes = handle.read()
+                    if not file_bytes:
+                        return "error", None, "El archivo está vacío."
+
+                    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+                    file_mime = content_type or ("application/pdf" if ext == "pdf" else "text/plain")
+                    if ext == "pdf":
+                        file_text = extract_pdf_text(file_bytes)
+                    else:
+                        try:
+                            file_text = file_bytes.decode("utf-8")
+                        except UnicodeDecodeError:
+                            file_text = file_bytes.decode("utf-8", errors="ignore")
+                    file_text = (file_text or "").strip()
+                    if not file_text:
+                        return "error", None, "El archivo no contiene texto legible."
+                    chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
+                    if not chunks:
+                        return "error", None, "No se pudo dividir el texto para IA."
+
+                    exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
+                    base_name = Path(filename).stem if filename else subject.name
+                    title = f"{exam.tema} - {base_name}".strip(" -")
+                    if exam_date_str != "No indicada":
+                        title = f"{title} ({exam_date_str})"
+
+                    note = Note(
+                        user_id=user_id,
+                        subject_id=subject.id,
+                        title=title,
+                        exam_date=exam.exam_date,
+                        original_filename=filename,
+                        content=f"{title}\n\n",
+                        ai_used=True,
+                    )
+                    db.session.add(note)
+                    db.session.flush()
+                    db.session.add(
+                        NoteSourceFile(
+                            note_id=note.id,
+                            filename=filename or "input.txt",
+                            content_type=file_mime or "application/octet-stream",
+                            data=file_bytes,
+                        )
+                    )
+
+                    deck = FlashcardDeck(
+                        user_id=user_id,
+                        subject_id=subject.id,
+                        title=title,
+                        exam_date=exam.exam_date,
+                        source_note_id=note.id,
+                        flashcards=[],
+                    )
+                    db.session.add(deck)
+                    db.session.flush()
+
+                    for idx, chunk in enumerate(chunks):
+                        db.session.add(
+                            Job(
+                                user_id=user_id,
+                                type="note_ai_chunk",
+                                payload={
+                                    "user_id": user_id,
+                                    "subject_id": subject.id,
+                                    "note_id": note.id,
+                                    "title": title,
+                                    "exam_date": exam_date_str,
+                                    "filename": filename or "input.txt",
+                                    "text": chunk,
+                                    "model": model,
+                                    "chunk_index": idx,
+                                    "total_chunks": len(chunks),
+                                },
+                            )
+                        )
+                        db.session.add(
+                            Job(
+                                user_id=user_id,
+                                type="flashcards_ai_chunk",
+                                payload={
+                                    "user_id": user_id,
+                                    "note_id": note.id,
+                                    "deck_id": deck.id,
+                                    "model": model,
+                                    "count": 6,
+                                    "chunk_index": idx,
+                                    "total_chunks": len(chunks),
+                                    "text": chunk,
+                                },
+                            )
+                        )
+                    db.session.commit()
+                    return "success", f"Archivo procesado: {filename}", None
+                finally:
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+
             if job.type == "note_ai":
                 payload = job.payload or {}
                 user_id = payload.get("user_id")
@@ -557,6 +719,11 @@ def process_job(app, job: Job):
 def create_app():
     app = Flask(__name__)
 
+    os.makedirs(app.instance_path, exist_ok=True)
+    upload_dir = os.getenv("UPLOAD_DIR") or os.path.join(app.instance_path, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    app.config["UPLOAD_DIR"] = upload_dir
+
     # LM Studio
     app.config["LMSTUDIO_API_BASE"] = os.getenv("LMSTUDIO_API_BASE", "http://127.0.0.1:1234/v1")
     app.config["LMSTUDIO_MODEL"] = os.getenv("LMSTUDIO_MODEL", "google/gemma-3-1b")
@@ -565,15 +732,34 @@ def create_app():
 
     # App/DB
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.db")
+    db_uri = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.db")
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+    if db_uri.startswith("sqlite"):
+        engine_options = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+        connect_args = engine_options.setdefault("connect_args", {})
+        connect_args.setdefault("timeout", 30)
+        connect_args.setdefault("check_same_thread", False)
+
+        @event.listens_for(Engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, _connection_record):
+            if dbapi_connection.__class__.__module__.startswith("sqlite3"):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL;")
+                cursor.execute("PRAGMA busy_timeout=30000;")
+                cursor.close()
 
     db.init_app(app)
 
     login_manager = LoginManager()
     login_manager.login_view = "login"
     login_manager.init_app(app)
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_file_too_large(_error):
+        max_kb = (app.config.get("MAX_CONTENT_LENGTH") or MAX_UPLOAD_BYTES) // 1024
+        flash(f"Archivo demasiado grande. Máximo {max_kb} KB.", "error")
+        return redirect(request.referrer or url_for("dashboard"))
 
     def queue_has_work() -> bool:
         return db.session.query(Job.id).filter(Job.status.in_(("pending", "running"))).first() is not None
@@ -671,26 +857,35 @@ def create_app():
                 def worker_loop():
                     while True:
                         with app.app_context():
-                            if get_active_profe_lock():
-                                time.sleep(2)
-                                continue
-                            job = (
-                                Job.query.filter_by(status="pending")
-                                .order_by(Job.created_at.asc(), Job.id.asc())
-                                .first()
-                            )
-                            if not job:
-                                time.sleep(2)
-                                continue
-                            job.status = "running"
-                            db.session.commit()
+                            try:
+                                if get_active_profe_lock():
+                                    time.sleep(2)
+                                    continue
+                                job = (
+                                    Job.query.filter_by(status="pending")
+                                    .order_by(Job.created_at.asc(), Job.id.asc())
+                                    .first()
+                                )
+                                if not job:
+                                    time.sleep(2)
+                                    continue
+                                job.status = "running"
+                                db.session.commit()
 
-                            status, msg, err = process_job(app, job)
-                            job.status = status
-                            job.result_message = msg
-                            job.error_message = err
-                            job.updated_at = datetime.utcnow()
-                            db.session.commit()
+                                status, msg, err = process_job(app, job)
+                                job.status = status
+                                job.result_message = msg
+                                job.error_message = err
+                                job.updated_at = datetime.utcnow()
+                                db.session.commit()
+                            except OperationalError as exc:
+                                db.session.rollback()
+                                if "database is locked" in str(exc).lower():
+                                    time.sleep(1.5)
+                                    continue
+                                app.logger.exception("Database error in worker loop")
+                                time.sleep(2)
+                                continue
                         # pequeña pausa para no saturar
                         time.sleep(0.5)
 
@@ -903,10 +1098,6 @@ def create_app():
                                 continue
                             exam_entries.append({"date": exam_date, "tema": tema})
 
-                        if not exam_entries:
-                            errors.append(f"La asignatura \"{name}\" necesita al menos un examen.")
-                            continue
-
                         subjects_clean.append({"name": name, "exams": exam_entries})
 
             if errors:
@@ -978,10 +1169,9 @@ def create_app():
                 db.session.commit()
 
             total_files = 0
-            total_notes = 0
-            total_decks = 0
-            total_chunks = 0
+            queued_files = 0
             errors: list[str] = []
+            upload_dir = app.config.get("UPLOAD_DIR") or app.instance_path
 
             try:
                 for block in subject_blocks:
@@ -997,116 +1187,50 @@ def create_app():
                                 continue
 
                             filename = secure_filename(upload.filename)
-                            file_bytes = upload.read()
-                            if not file_bytes:
+                            if not filename:
+                                errors.append("Nombre de archivo inválido.")
+                                continue
+
+                            stored_name = f"{uuid.uuid4().hex}_{filename}"
+                            stored_path = os.path.join(upload_dir, stored_name)
+                            try:
+                                size, err = save_upload_stream(upload, stored_path, MAX_UPLOAD_BYTES)
+                            except Exception:
+                                errors.append(f"{filename}: error guardando el archivo.")
+                                if os.path.exists(stored_path):
+                                    os.remove(stored_path)
+                                continue
+                            if err == "empty":
                                 errors.append(f"{filename}: el archivo está vacío.")
                                 continue
-                            if len(file_bytes) > MAX_UPLOAD_BYTES:
+                            if err == "too_large":
                                 errors.append(f"{filename}: archivo demasiado grande (máx {MAX_UPLOAD_BYTES // 1024} KB).")
                                 continue
-
-                            ext = filename.rsplit(".", 1)[1].lower()
-                            file_mime = upload.mimetype or ("application/pdf" if ext == "pdf" else "text/plain")
-                            if ext == "pdf":
-                                file_text = extract_pdf_text(file_bytes)
-                            else:
-                                try:
-                                    file_text = file_bytes.decode("utf-8")
-                                except UnicodeDecodeError:
-                                    file_text = file_bytes.decode("utf-8", errors="ignore")
-                            file_text = (file_text or "").strip()
-                            if not file_text:
-                                errors.append(f"{filename}: no contiene texto legible.")
-                                continue
-                            if len(file_text) > MAX_TEXT_CHARS:
-                                file_text = file_text[:MAX_TEXT_CHARS]
-
-                            chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
-                            if not chunks:
-                                errors.append(f"{filename}: no se pudo dividir el texto para IA.")
+                            if size <= 0:
+                                errors.append(f"{filename}: el archivo está vacío.")
                                 continue
 
-                            exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
-                            base_name = Path(filename).stem if filename else subject.name
-                            title = f"{exam.tema} - {base_name}".strip(" -")
-                            if exam_date_str != "No indicada":
-                                title = f"{title} ({exam_date_str})"
-
-                            note = Note(
-                                user_id=current_user.id,
-                                subject_id=subject.id,
-                                title=title,
-                                exam_date=exam.exam_date,
-                                original_filename=filename,
-                                content=f"{title}\n\n",
-                                ai_used=True,
-                            )
-                            db.session.add(note)
-                            db.session.flush()
                             db.session.add(
-                                NoteSourceFile(
-                                    note_id=note.id,
-                                    filename=filename or "input.txt",
-                                    content_type=file_mime or "application/octet-stream",
-                                    data=file_bytes,
+                                Job(
+                                    user_id=current_user.id,
+                                    type="file_import",
+                                    payload={
+                                        "user_id": current_user.id,
+                                        "subject_id": subject.id,
+                                        "exam_id": exam.id,
+                                        "filename": filename,
+                                        "file_path": stored_path,
+                                        "content_type": upload.mimetype or "",
+                                        "model": selected_model,
+                                    },
                                 )
                             )
+                            queued_files += 1
 
-                            deck = FlashcardDeck(
-                                user_id=current_user.id,
-                                subject_id=subject.id,
-                                title=title,
-                                exam_date=exam.exam_date,
-                                source_note_id=note.id,
-                                flashcards=[],
-                            )
-                            db.session.add(deck)
-                            db.session.flush()
-
-                            for idx, chunk in enumerate(chunks):
-                                db.session.add(
-                                    Job(
-                                        user_id=current_user.id,
-                                        type="note_ai_chunk",
-                                        payload={
-                                            "user_id": current_user.id,
-                                            "subject_id": subject.id,
-                                            "note_id": note.id,
-                                            "title": title,
-                                            "exam_date": exam_date_str,
-                                            "filename": filename or "input.txt",
-                                            "text": chunk,
-                                            "model": selected_model,
-                                            "chunk_index": idx,
-                                            "total_chunks": len(chunks),
-                                        },
-                                    )
-                                )
-                                db.session.add(
-                                    Job(
-                                        user_id=current_user.id,
-                                        type="flashcards_ai_chunk",
-                                        payload={
-                                            "user_id": current_user.id,
-                                            "note_id": note.id,
-                                            "deck_id": deck.id,
-                                            "model": selected_model,
-                                            "count": 6,
-                                            "chunk_index": idx,
-                                            "total_chunks": len(chunks),
-                                            "text": chunk,
-                                        },
-                                    )
-                                )
-                            total_notes += 1
-                            total_decks += 1
-                            total_chunks += len(chunks)
-
-                if total_notes:
+                if queued_files:
                     db.session.commit()
                     flash(
-                        f"Generación encolada ✅ {total_files} archivo(s), {total_notes} resumen(es), "
-                        f"{total_decks} deck(s), {total_chunks} fragmento(s).",
+                        f"Archivos en cola ✅ {queued_files} archivo(s). Se procesarán en segundo plano.",
                         "success",
                     )
                 else:
@@ -1128,7 +1252,6 @@ def create_app():
             models=available_models,
             selected_model=selected_model,
             max_kb=MAX_UPLOAD_BYTES // 1024,
-            max_chars=MAX_TEXT_CHARS,
         )
 
     @app.route("/setup/next")
@@ -1149,7 +1272,9 @@ def create_app():
     @app.route("/dashboard")
     @login_required
     def dashboard():
-        return render_template("dashboard.html", username=current_user.username)
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        student_name = profile.student_name if profile else current_user.username
+        return render_template("dashboard.html", student_name=student_name)
 
     @app.route("/options")
     @login_required
@@ -1336,26 +1461,32 @@ def create_app():
     @app.route("/api/jobs/updates")
     @login_required
     def api_jobs_updates():
-        jobs = (
-            Job.query.filter(
-                Job.user_id == current_user.id,
-                Job.status.in_(("success", "error")),
-                Job.notified.is_(False),
+        try:
+            jobs = (
+                Job.query.filter(
+                    Job.user_id == current_user.id,
+                    Job.status.in_(("success", "error")),
+                    Job.notified.is_(False),
+                )
+                .order_by(Job.updated_at.desc())
+                .all()
             )
-            .order_by(Job.updated_at.desc())
-            .all()
-        )
-        payload = [
-            {
-                "id": j.id,
-                "status": j.status,
-                "message": j.result_message or j.error_message or "",
-            }
-            for j in jobs
-        ]
-        for j in jobs:
-            j.notified = True
-        db.session.commit()
+            payload = [
+                {
+                    "id": j.id,
+                    "status": j.status,
+                    "message": j.result_message or j.error_message or "",
+                }
+                for j in jobs
+            ]
+            for j in jobs:
+                j.notified = True
+            db.session.commit()
+        except OperationalError as exc:
+            db.session.rollback()
+            if "database is locked" in str(exc).lower():
+                return jsonify({"jobs": []})
+            raise
         return jsonify({"jobs": payload})
 
     # ---------- Ask Profe ----------
@@ -1535,8 +1666,6 @@ def create_app():
                 if not file_text:
                     flash("El archivo no contiene texto legible.", "error")
                     return redirect(url_for("add_notes"))
-                if len(file_text) > MAX_TEXT_CHARS:
-                    file_text = file_text[:MAX_TEXT_CHARS]
             else:
                 filename = None
 
@@ -1642,7 +1771,6 @@ def create_app():
             models=available_models,
             selected_model=selected_model,
             max_kb=MAX_UPLOAD_BYTES // 1024,
-            max_chars=MAX_TEXT_CHARS,
             jobs=jobs,
         )
 
@@ -1866,15 +1994,14 @@ def create_app():
                     return redirect(url_for("flashcards_create"))
 
                 custom_title = (request.form.get("ai_deck_title") or "").strip()
-                count_per_chunk = max(1, min(request.form.get("count", type=int) or 5, 50))
+                count_per_chunk = request.form.get("count", type=int) or FLASHCARD_CHUNK_DEFAULT
+                if count_per_chunk not in FLASHCARD_CHUNK_COUNTS:
+                    flash("Selecciona una cantidad válida de flashcards por fragmento.", "error")
+                    return redirect(url_for("flashcards_create"))
 
                 chunk_entry = note_chunk_map.get(note.id) or {"chunks": [note.content or ""], "total": 1}
                 chunks = chunk_entry.get("chunks") or [note.content or ""]
                 chunk_count = len(chunks)
-                max_chunks_allowed = max(1, 50 // count_per_chunk) if count_per_chunk else 1
-                if chunk_count > max_chunks_allowed:
-                    chunks = chunks[:max_chunks_allowed]
-                    chunk_count = len(chunks)
 
                 if target_deck:
                     deck = target_deck
@@ -1907,8 +2034,8 @@ def create_app():
                     )
                     db.session.add(job)
                 db.session.commit()
-                total_cards = min(50, count_per_chunk * chunk_count)
-                flash(f"Generación encolada ✅ {chunk_count} fragmentos × {count_per_chunk} (máx 50, total estimado {total_cards}).", "success")
+                total_cards = count_per_chunk * chunk_count
+                flash(f"Generación encolada ✅ {chunk_count} fragmentos × {count_per_chunk} (total estimado {total_cards}).", "success")
                 return redirect(url_for("flashcards_create"))
 
             # ---- MANUAL ----
@@ -2002,6 +2129,8 @@ def create_app():
             models=available_models,
             selected_model=selected_model,
             decks=decks,
+            count_options=FLASHCARD_CHUNK_COUNTS,
+            default_count=FLASHCARD_CHUNK_DEFAULT,
             jobs=Job.query.filter_by(user_id=current_user.id).order_by(Job.created_at.desc()).limit(10).all(),
         )
 
@@ -2092,14 +2221,13 @@ def create_app():
                     flash("Resumen/apunte inválido.", "error")
                     return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
-                count_per_chunk = 5  # fijo en UI actual
+                count_per_chunk = request.form.get("count", type=int) or FLASHCARD_CHUNK_DEFAULT
+                if count_per_chunk not in FLASHCARD_CHUNK_COUNTS:
+                    flash("Selecciona una cantidad válida de flashcards por fragmento.", "error")
+                    return redirect(url_for("flashcards_edit", deck_id=deck.id))
                 chunk_entry = note_chunk_map.get(note.id) or {"chunks": [note.content or ""], "total": 1}
                 chunks = chunk_entry.get("chunks") or [note.content or ""]
                 chunk_count = len(chunks)
-                max_chunks_allowed = max(1, 50 // count_per_chunk)
-                if chunk_count > max_chunks_allowed:
-                    chunks = chunks[:max_chunks_allowed]
-                    chunk_count = len(chunks)
 
                 for idx, chunk in enumerate(chunks):
                     job = Job(
@@ -2118,8 +2246,8 @@ def create_app():
                     )
                     db.session.add(job)
                 db.session.commit()
-                total_cards = min(50, count_per_chunk * chunk_count)
-                flash(f"Generación de flashcards encolada ✅ {chunk_count} fragmentos × {count_per_chunk} (máx 50, total estimado {total_cards}).", "success")
+                total_cards = count_per_chunk * chunk_count
+                flash(f"Generación de flashcards encolada ✅ {chunk_count} fragmentos × {count_per_chunk} (total estimado {total_cards}).", "success")
                 return redirect(url_for("flashcards_edit", deck_id=deck.id))
 
             if mode == "merge":
@@ -2208,6 +2336,8 @@ def create_app():
             other_decks=other_decks,
             models=available_models,
             selected_model=selected_model,
+            count_options=FLASHCARD_CHUNK_COUNTS,
+            default_count=FLASHCARD_CHUNK_DEFAULT,
             jobs=Job.query.filter_by(user_id=current_user.id).order_by(Job.created_at.desc()).limit(10).all(),
         )
 

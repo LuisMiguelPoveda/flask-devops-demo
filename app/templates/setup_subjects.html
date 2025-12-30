@@ -48,7 +48,7 @@
   <template id="exam-template">
     <div data-exam style="display:grid; grid-template-columns:160px 1fr auto; gap:10px; align-items:end;">
       <div>
-        <label>Fecha</label>
+        <label>Fecha de examen</label>
         <input data-exam-date type="date" required />
       </div>
       <div>
@@ -112,8 +112,6 @@
 
       if (Array.isArray(data.exams) && data.exams.length) {
         data.exams.forEach((exam) => addExam(examsRoot, exam));
-      } else {
-        addExam(examsRoot);
       }
 
       subjectsRoot.appendChild(fragment);

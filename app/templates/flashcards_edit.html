@@ -11,8 +11,8 @@
   </header>
 
   <div class="card" style="margin-bottom:16px;">
-    <h3>Añadir 5 flashcards con IA</h3>
-    <p>Selecciona un apunte/resumen; se generarán 5 tarjetas por fragmento del apunte (máx total 50).</p>
+    <h3>Añadir flashcards con IA</h3>
+    <p>Selecciona un apunte/resumen; se generarán tarjetas por fragmento según la cantidad elegida.</p>
 
     <form method="post" class="stack" id="ai-append-form">
       <input type="hidden" name="mode" value="append_ai" />
@@ -21,6 +21,13 @@
       <select class="input" name="model">
         {% for m in models %}
           <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+
+      <label class="label">Flashcards por fragmento</label>
+      <select class="input" name="count">
+        {% for opt in count_options %}
+          <option value="{{ opt }}" {% if opt == default_count %}selected{% endif %}>{{ opt }}</option>
         {% endfor %}
       </select>
 
