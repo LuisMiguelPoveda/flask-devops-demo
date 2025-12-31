@@ -46,7 +46,7 @@
       {% for n in notes %}
         {% set subject_color = n.subject.color or '#94a3b8' %}
         <div class="card subject-tint" style="margin-top: 1rem; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
-          <h3>{{ n.title }}</h3>
+          <h3>{{ n.subject.name }}: {{ n.title }}</h3>
           <p>
             <strong>Asignatura:</strong> {{ n.subject.name }} |
             <strong>Fecha de examen:</strong> {{ n.exam_date if n.exam_date else "—" }} |
@@ -101,7 +101,7 @@
             <select id="target_note" name="target_note" required>
               <option value="">(elige destino)</option>
               {% for n in notes %}
-                <option value="{{ n.id }}">{{ n.title }} — {{ n.subject.name }}</option>
+                <option value="{{ n.id }}">{{ n.subject.name }}: {{ n.title }}</option>
               {% endfor %}
             </select>
           </div>
@@ -110,7 +110,7 @@
             <select id="source_note" name="source_note" required>
               <option value="">(elige origen)</option>
               {% for n in notes %}
-                <option value="{{ n.id }}">{{ n.title }} — {{ n.subject.name }}</option>
+                <option value="{{ n.id }}">{{ n.subject.name }}: {{ n.title }}</option>
               {% endfor %}
             </select>
           </div>

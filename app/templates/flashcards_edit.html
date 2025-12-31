@@ -36,7 +36,7 @@
         <option value="">(elige uno)</option>
         {% for n in notes %}
           <option value="{{ n.id }}">
-            {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %} — {{ note_chunk_counts.get(n.id, 1) }} fragmentos
+            {{ n.subject.name }}: {{ n.title }} — {{ note_chunk_counts.get(n.id, 1) }} fragmentos
           </option>
         {% endfor %}
       </select>

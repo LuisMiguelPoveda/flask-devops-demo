@@ -66,12 +66,12 @@
               <option value="">(elige uno)</option>
               {% for n in notes %}
                 <option value="{{ n.id }}">
-                  {{ n.title }} — {{ n.subject.name }}{% if n.exam_date %} ({{ n.exam_date }}){% endif %} — {{ note_chunk_counts.get(n.id, 1) }} fragmentos
+                  {{ n.subject.name }}: {{ n.title }} — {{ note_chunk_counts.get(n.id, 1) }} fragmentos
                 </option>
               {% endfor %}
             </select>
           </label>
-          <p class="subtle">El número de fragmentos se calcula con los mismos límites que el resumen IA (3.000 tokens con 500 de solape).</p>
+          <p class="subtle">El número de fragmentos se calcula con los mismos límites que el resumen IA (~{{ chunk_tokens }} tokens con {{ chunk_overlap }} de solape).</p>
 
           <ul class="nav-list" data-nav>
             <li><button class="nav-option btn-primary" type="submit" id="ai-create-btn">Generar con IA</button></li>

@@ -18,7 +18,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 from pptx import Presentation
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
@@ -50,9 +50,43 @@ from .models import (
 ALLOWED_EXTENSIONS = {"txt", "pdf", "pptx"}
 # Permitimos hasta ~50 MB por archivo
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-MAX_SUMMARY_TOKENS = 5000
-SUMMARY_MIN_TOKENS = 120
-SUMMARY_TOKEN_RATIO = 0.6
+LLM_PROFILE_CHOICES = [
+    {
+        "id": "vram_4gb",
+        "label": "4 GB (conservador)",
+        "chunk_tokens": 1500,
+        "chunk_overlap": 250,
+        "summary_max_tokens": 1500,
+        "summary_min_tokens": 120,
+        "summary_ratio": 0.5,
+    },
+    {
+        "id": "vram_8gb",
+        "label": "8 GB (equilibrado)",
+        "chunk_tokens": 2200,
+        "chunk_overlap": 350,
+        "summary_max_tokens": 2200,
+        "summary_min_tokens": 120,
+        "summary_ratio": 0.45,
+    },
+    {
+        "id": "vram_16gb",
+        "label": "16 GB (alto)",
+        "chunk_tokens": 3000,
+        "chunk_overlap": 500,
+        "summary_max_tokens": 3500,
+        "summary_min_tokens": 120,
+        "summary_ratio": 0.5,
+    },
+]
+LLM_PROFILE_PRESETS = {choice["id"]: choice for choice in LLM_PROFILE_CHOICES}
+DEFAULT_LLM_PROFILE = "vram_4gb"
+DEFAULT_LLM_LIMITS = LLM_PROFILE_PRESETS[DEFAULT_LLM_PROFILE]
+MAX_SUMMARY_TOKENS = DEFAULT_LLM_LIMITS["summary_max_tokens"]
+SUMMARY_MIN_TOKENS = DEFAULT_LLM_LIMITS["summary_min_tokens"]
+SUMMARY_TOKEN_RATIO = DEFAULT_LLM_LIMITS["summary_ratio"]
+DEFAULT_CHUNK_TOKENS = DEFAULT_LLM_LIMITS["chunk_tokens"]
+DEFAULT_CHUNK_OVERLAP = DEFAULT_LLM_LIMITS["chunk_overlap"]
 FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
 FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
 LLM_OFFLINE_LABEL = "Motor LLM no encontrado"
@@ -63,7 +97,11 @@ _worker_lock_handle = None
 JOB_RETRY_SECONDS = 30
 
 
-def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 500) -> list[str]:
+def chunk_text_with_overlap(
+    text: str,
+    max_tokens: int = DEFAULT_CHUNK_TOKENS,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[str]:
     """
     Corta el texto en fragmentos aproximados de tokens (palabras) con solapamiento
     para minimizar la pérdida de contexto entre partes.
@@ -88,12 +126,17 @@ def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 50
     return chunks
 
 
-def estimate_summary_max_tokens(text: str) -> int:
+def estimate_summary_max_tokens(
+    text: str,
+    max_tokens: int = MAX_SUMMARY_TOKENS,
+    min_tokens: int = SUMMARY_MIN_TOKENS,
+    ratio: float = SUMMARY_TOKEN_RATIO,
+) -> int:
     word_count = len((text or "").split())
-    target = int(word_count * SUMMARY_TOKEN_RATIO)
+    target = int(word_count * ratio)
     if target <= 0:
-        target = SUMMARY_MIN_TOKENS
-    return max(SUMMARY_MIN_TOKENS, min(MAX_SUMMARY_TOKENS, target))
+        target = min_tokens
+    return max(min_tokens, min(max_tokens, target))
 
 
 def normalize_subject_color(value: str | None) -> str | None:
@@ -105,7 +148,28 @@ def normalize_subject_color(value: str | None) -> str | None:
     return value if HEX_COLOR_RE.match(value) else None
 
 
-def build_note_chunks_map(user_id: int, notes: list[Note], max_tokens: int = 3000, overlap: int = 500) -> dict[int, dict]:
+def resolve_llm_profile(user_id: int | None) -> str:
+    if not user_id:
+        return DEFAULT_LLM_PROFILE
+    profile = StudentProfile.query.filter_by(user_id=user_id).first()
+    if profile and profile.llm_profile:
+        candidate = profile.llm_profile.strip()
+        if candidate in LLM_PROFILE_PRESETS:
+            return candidate
+    return DEFAULT_LLM_PROFILE
+
+
+def get_llm_limits(user_id: int | None) -> dict:
+    profile_key = resolve_llm_profile(user_id)
+    return LLM_PROFILE_PRESETS.get(profile_key, DEFAULT_LLM_LIMITS)
+
+
+def build_note_chunks_map(
+    user_id: int,
+    notes: list[Note],
+    max_tokens: int = DEFAULT_CHUNK_TOKENS,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> dict[int, dict]:
     """
     Devuelve un dict {note_id: {"chunks": [str], "total": int}}.
     Usa los trabajos note_ai_chunk si existen para respetar el número de fragmentos originales;
@@ -355,13 +419,77 @@ def lmstudio_chat(
     return data["choices"][0]["message"]["content"].strip()
 
 
-def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date: str, filename: str, text: str, chunk_index: int | None = None, total_chunks: int | None = None) -> str:
+def lmstudio_summarize_text(
+    app,
+    model: str,
+    subject: str,
+    title: str,
+    exam_date: str,
+    filename: str,
+    text: str,
+    chunk_index: int | None = None,
+    total_chunks: int | None = None,
+    user_id: int | None = None,
+) -> str:
     system_prompt = (
-        "Eres un profesor experto. Devuelve solo el resumen, sin frases introductorias ni notas sobre tu respuesta. "
-        "Usa el idioma predominante del texto; si está en español o no hay predominio claro, responde en español. "
-        "Mantén un único idioma coherente en todo el resumen, en formato de viñetas claras y concisas. "
-        "No inventes información, no mezcles idiomas, no menciones fragmentos, cortes ni títulos añadidos, y no incluyas introducción ni despedida. "
-        "No copies el texto original ni repitas frases largas. Máximo 12 viñetas (si el texto es breve, menos) y usa '-' al inicio de cada viñeta."
+        "Actúa como un especialista en pedagogía y diseño instruccional con experiencia en TDAH y carga cognitiva.\n\n"
+        "Tu tarea es transformar el TEXTO FUENTE en APUNTES GUIADOS altamente estructurados,\n"
+        "optimizados para estudiantes con déficit de atención.\n\n"
+        "REGLAS GENERALES (obligatorias):\n"
+        "1. Mantén SIEMPRE la misma macroestructura y los mismos encabezados.\n"
+        "2. Usa fragmentación cognitiva (chunking): bloques cortos y visualmente claros.\n"
+        "3. Reduce texto continuo: prioriza bullets jerárquicos, tablas y esquemas.\n"
+        "4. Señaliza explícitamente lo importante (clave, confusión común, examinable).\n"
+        "5. No añadas información nueva: solo reorganiza y clarifica el texto dado.\n"
+        "6. Lenguaje claro, directo, sin metáforas ni digresiones.\n"
+        "7. Cada bloque debe poder leerse de forma independiente en <30 segundos.\n"
+        "8. Máximo 12–15 líneas por sección principal.\n"
+        "9. Usa siempre palabras clave antes de explicaciones breves.\n"
+        "10. Evita listas planas: mínimo dos niveles de jerarquía cuando haya listas.\n\n"
+        "FORMATO FIJO (NO MODIFICAR):\n\n"
+        "────────────────────────\n"
+        " TEMA:\n"
+        "[Nombre claro y conciso del tema]\n\n"
+        " IDEA CENTRAL (1 frase):\n"
+        "• [Qué es / para qué sirve]\n\n"
+        "────────────────────────\n"
+        " CONCEPTOS CLAVE:\n"
+        "• Concepto 1\n"
+        "  – Definición corta\n"
+        "  – Ejemplo mínimo (si aplica)\n"
+        "• Concepto 2\n"
+        "  – Definición corta\n"
+        "  – Ejemplo mínimo\n\n"
+        "────────────────────────\n"
+        " RELACIONES IMPORTANTES:\n"
+        "• [Concepto A] → [Concepto B]\n"
+        "  – Tipo de relación (causa, consecuencia, contraste, parte–todo)\n\n"
+        "────────────────────────\n"
+        " PASOS / PROCESO / ESTRUCTURA (si aplica):\n"
+        "1. Paso 1 — palabra clave\n"
+        "   – Qué ocurre\n"
+        "2. Paso 2 — palabra clave\n"
+        "   – Qué ocurre\n\n"
+        "────────────────────────\n"
+        " ERRORES O CONFUSIONES COMUNES:\n"
+        "• Error frecuente\n"
+        "  – Por qué es incorrecto\n\n"
+        "────────────────────────\n"
+        " LO QUE SÍ ENTRA EN EXAMEN / EVALUACIÓN:\n"
+        "• Hecho, definición o relación clave\n\n"
+        "────────────────────────\n"
+        " HUECOS PARA COMPLETAR (guided notes):\n"
+        "• _______________________________\n"
+        "• _______________________________\n\n"
+        "────────────────────────\n"
+        " CONEXIÓN CON OTROS APUNTES:\n"
+        "• Se relaciona con: [tema previo / tema siguiente]\n"
+        "• Idea puente: ____________________\n\n"
+        "────────────────────────\n\n"
+        "ENTRADA:\n"
+        "[TEXTO FUENTE AQUÍ]\n\n"
+        "SALIDA:\n"
+        "Apuntes siguiendo EXACTAMENTE el formato indicado."
     )
     chunk_meta_line = ""
     if total_chunks and total_chunks > 1:
@@ -375,7 +503,13 @@ def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date
         f"{chunk_meta_line}\n\n"
         f"TEXTO A RESUMIR:\n{text}"
     )
-    max_tokens = estimate_summary_max_tokens(text)
+    limits = get_llm_limits(user_id)
+    max_tokens = estimate_summary_max_tokens(
+        text,
+        max_tokens=limits["summary_max_tokens"],
+        min_tokens=limits["summary_min_tokens"],
+        ratio=limits["summary_ratio"],
+    )
     return lmstudio_chat(
         app,
         model,
@@ -540,7 +674,12 @@ def process_job(app, job: Job):
                 file_text = (file_text or "").strip()
                 if not file_text:
                     return "error", None, "El archivo no contiene texto legible."
-                chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
+                limits = get_llm_limits(user_id)
+                chunks = chunk_text_with_overlap(
+                    file_text,
+                    max_tokens=limits["chunk_tokens"],
+                    overlap=limits["chunk_overlap"],
+                )
                 if not chunks:
                     return "error", None, "No se pudo dividir el texto para IA."
 
@@ -644,7 +783,16 @@ def process_job(app, job: Job):
                 if not subject or not user:
                     return "error", None, "Asignatura o usuario inválido."
 
-                content = lmstudio_summarize_text(app, model, subject.name, title, exam_date_str, filename, text)
+                content = lmstudio_summarize_text(
+                    app,
+                    model,
+                    subject.name,
+                    title,
+                    exam_date_str,
+                    filename,
+                    text,
+                    user_id=user_id,
+                )
                 if not content.strip():
                     return "error", None, "El modelo devolvió un resumen vacío."
                 # Prepend title to content to ensure first line carries it.
@@ -693,6 +841,7 @@ def process_job(app, job: Job):
                     text,
                     chunk_index=chunk_index,
                     total_chunks=total_chunks,
+                    user_id=user_id,
                 )
                 if not summary.strip():
                     return "error", None, "El modelo devolvió un resumen vacío para el fragmento."
@@ -916,6 +1065,18 @@ def create_app():
             return None
         return lock_file
 
+    def ensure_profile_schema():
+        try:
+            if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
+                return
+            rows = db.session.execute(text("PRAGMA table_info(student_profiles)")).all()
+            columns = {row[1] for row in rows}
+            if "llm_profile" not in columns:
+                db.session.execute(text("ALTER TABLE student_profiles ADD COLUMN llm_profile VARCHAR(20)"))
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     with app.app_context():
         db_lock = acquire_process_lock("flask-devops-demo-db-init.lock", blocking=True)
         try:
@@ -924,6 +1085,8 @@ def create_app():
             message = str(exc).lower()
             if "already exists" not in message:
                 raise
+        try:
+            ensure_profile_schema()
         finally:
             if db_lock:
                 fcntl.flock(db_lock.fileno(), fcntl.LOCK_UN)
@@ -1062,28 +1225,50 @@ def create_app():
     def setup():
         profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
         student_name = profile.student_name if profile else ""
-        student_age = str(profile.age) if profile else ""
+        student_age = ""
         personality_notes = profile.personality_notes if profile else ""
+        llm_profile = (
+            profile.llm_profile
+            if profile and profile.llm_profile in LLM_PROFILE_PRESETS
+            else DEFAULT_LLM_PROFILE
+        )
 
         if request.method == "POST":
             student_name = (request.form.get("student_name") or "").strip()
             student_age = (request.form.get("student_age") or "").strip()
             personality_notes = (request.form.get("personality_notes") or "").strip()
+            llm_profile = (request.form.get("llm_profile") or llm_profile).strip()
 
             errors: list[str] = []
             if not student_name:
                 errors.append("Escribe el nombre del estudiante.")
 
             age_val = None
-            try:
-                age_val = int(student_age)
-                if age_val < 1:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors.append("Indica una edad válida.")
+            birth_date = None
+            if student_age:
+                if "-" in student_age:
+                    try:
+                        birth_date = datetime.strptime(student_age, "%Y-%m-%d").date()
+                    except ValueError:
+                        birth_date = None
+                    if birth_date:
+                        today = datetime.utcnow().date()
+                        age_val = today.year - birth_date.year
+                        if (today.month, today.day) < (birth_date.month, birth_date.day):
+                            age_val -= 1
+                else:
+                    try:
+                        age_val = int(student_age)
+                    except (TypeError, ValueError):
+                        age_val = None
+
+            if not age_val or age_val < 1:
+                errors.append("Indica una fecha de nacimiento válida.")
 
             if not personality_notes:
                 errors.append("Añade detalles de personalidad para contextualizar al profe.")
+            if llm_profile not in LLM_PROFILE_PRESETS:
+                errors.append("Selecciona un perfil de VRAM válido.")
 
             if errors:
                 for err in errors:
@@ -1093,6 +1278,10 @@ def create_app():
                     student_name=student_name,
                     student_age=student_age,
                     personality_notes=personality_notes,
+                    llm_profiles=LLM_PROFILE_CHOICES,
+                    llm_profile=llm_profile,
+                    age_label="Fecha de nacimiento",
+                    age_mode="dob",
                 )
 
             try:
@@ -1101,12 +1290,14 @@ def create_app():
                     profile.student_name = student_name
                     profile.age = age_val or 0
                     profile.personality_notes = personality_notes
+                    profile.llm_profile = llm_profile
                 else:
                     profile = StudentProfile(
                         user_id=current_user.id,
                         student_name=student_name,
                         age=age_val or 0,
                         personality_notes=personality_notes,
+                        llm_profile=llm_profile,
                     )
                     db.session.add(profile)
 
@@ -1121,6 +1312,10 @@ def create_app():
                     student_name=student_name,
                     student_age=student_age,
                     personality_notes=personality_notes,
+                    llm_profiles=LLM_PROFILE_CHOICES,
+                    llm_profile=llm_profile,
+                    age_label="Fecha de nacimiento",
+                    age_mode="dob",
                 )
 
         return render_template(
@@ -1128,6 +1323,10 @@ def create_app():
             student_name=student_name,
             student_age=student_age,
             personality_notes=personality_notes,
+            llm_profiles=LLM_PROFILE_CHOICES,
+            llm_profile=llm_profile,
+            age_label="Fecha de nacimiento",
+            age_mode="dob",
         )
 
     @app.route("/setup/subjects", methods=["GET", "POST"])
@@ -1525,11 +1724,13 @@ def create_app():
         student_name = profile.student_name or ""
         student_age = str(profile.age or "")
         personality_notes = profile.personality_notes or ""
+        llm_profile = profile.llm_profile if profile.llm_profile in LLM_PROFILE_PRESETS else DEFAULT_LLM_PROFILE
 
         if request.method == "POST":
             student_name = (request.form.get("student_name") or "").strip()
             student_age = (request.form.get("student_age") or "").strip()
             personality_notes = (request.form.get("personality_notes") or "").strip()
+            llm_profile = (request.form.get("llm_profile") or llm_profile).strip()
 
             errors: list[str] = []
             if not student_name:
@@ -1545,6 +1746,8 @@ def create_app():
 
             if not personality_notes:
                 errors.append("Añade detalles de personalidad para contextualizar al profe.")
+            if llm_profile not in LLM_PROFILE_PRESETS:
+                errors.append("Selecciona un perfil de VRAM válido.")
 
             if errors:
                 for err in errors:
@@ -1554,6 +1757,8 @@ def create_app():
                     student_name=student_name,
                     student_age=student_age,
                     personality_notes=personality_notes,
+                    llm_profiles=LLM_PROFILE_CHOICES,
+                    llm_profile=llm_profile,
                     page_title="Perfil del estudiante",
                     heading="Perfil del estudiante",
                     subtext="Actualiza los datos del estudiante cuando lo necesites.",
@@ -1564,6 +1769,7 @@ def create_app():
             profile.student_name = student_name
             profile.age = age_val or 0
             profile.personality_notes = personality_notes
+            profile.llm_profile = llm_profile
             db.session.commit()
             flash("Perfil actualizado ✅", "success")
             return redirect(url_for("options"))
@@ -1573,6 +1779,8 @@ def create_app():
             student_name=student_name,
             student_age=student_age,
             personality_notes=personality_notes,
+            llm_profiles=LLM_PROFILE_CHOICES,
+            llm_profile=llm_profile,
             page_title="Perfil del estudiante",
             heading="Perfil del estudiante",
             subtext="Actualiza los datos del estudiante cuando lo necesites.",
@@ -1829,6 +2037,9 @@ def create_app():
         subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
         available_models = fetch_models(app)
         selected_model = resolve_default_model(app, current_user.id, available_models)
+        llm_limits = get_llm_limits(current_user.id)
+        chunk_tokens = llm_limits["chunk_tokens"]
+        chunk_overlap = llm_limits["chunk_overlap"]
 
         if request.method == "POST":
             selected_model = request.form.get("model") or selected_model
@@ -1981,7 +2192,13 @@ def create_app():
             exam_date_str = exam_date.isoformat() if exam_date else "No indicada"
             chunks = []
             for text in file_texts:
-                chunks.extend(chunk_text_with_overlap(text, max_tokens=3000, overlap=500))
+                chunks.extend(
+                    chunk_text_with_overlap(
+                        text,
+                        max_tokens=chunk_tokens,
+                        overlap=chunk_overlap,
+                    )
+                )
             if not chunks:
                 flash("No se pudo dividir el texto en fragmentos para IA.", "error")
                 return redirect(url_for("add_notes"))
@@ -2104,6 +2321,8 @@ def create_app():
             models=available_models,
             selected_model=selected_model,
             max_kb=MAX_UPLOAD_BYTES // 1024,
+            chunk_tokens=chunk_tokens,
+            chunk_overlap=chunk_overlap,
             jobs=jobs,
         )
 
@@ -2301,7 +2520,15 @@ def create_app():
         )
         available_models = fetch_models(app)
         selected_model = resolve_default_model(app, current_user.id, available_models)
-        note_chunk_map = build_note_chunks_map(current_user.id, notes, max_tokens=3000, overlap=500)
+        llm_limits = get_llm_limits(current_user.id)
+        chunk_tokens = llm_limits["chunk_tokens"]
+        chunk_overlap = llm_limits["chunk_overlap"]
+        note_chunk_map = build_note_chunks_map(
+            current_user.id,
+            notes,
+            max_tokens=chunk_tokens,
+            overlap=chunk_overlap,
+        )
 
         if request.method == "POST":
             mode = (request.form.get("mode") or "ai").strip()
@@ -2473,6 +2700,8 @@ def create_app():
             note_chunk_counts={nid: info.get("total", 1) for nid, info in note_chunk_map.items()},
             models=available_models,
             selected_model=selected_model,
+            chunk_tokens=chunk_tokens,
+            chunk_overlap=chunk_overlap,
             decks=decks,
             count_options=FLASHCARD_CHUNK_COUNTS,
             default_count=FLASHCARD_CHUNK_DEFAULT,
@@ -2549,7 +2778,15 @@ def create_app():
         )
         available_models = fetch_models(app)
         selected_model = resolve_default_model(app, current_user.id, available_models)
-        note_chunk_map = build_note_chunks_map(current_user.id, notes, max_tokens=3000, overlap=500)
+        llm_limits = get_llm_limits(current_user.id)
+        chunk_tokens = llm_limits["chunk_tokens"]
+        chunk_overlap = llm_limits["chunk_overlap"]
+        note_chunk_map = build_note_chunks_map(
+            current_user.id,
+            notes,
+            max_tokens=chunk_tokens,
+            overlap=chunk_overlap,
+        )
 
         if request.method == "POST":
             mode = (request.form.get("mode") or "manual").strip()

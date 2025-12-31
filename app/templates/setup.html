@@ -14,8 +14,12 @@
       </div>
 
       <div>
-        <label for="student_age">Edad</label>
-        <input id="student_age" name="student_age" type="number" min="1" value="{{ student_age or '' }}" required />
+        <label for="student_age">{{ age_label or "Edad" }}</label>
+        {% if age_mode == "dob" %}
+          <input id="student_age" name="student_age" type="date" value="{{ student_age or '' }}" required />
+        {% else %}
+          <input id="student_age" name="student_age" type="number" min="1" value="{{ student_age or '' }}" required />
+        {% endif %}
       </div>
 
       <div>
@@ -23,6 +27,20 @@
         <textarea id="personality_notes" name="personality_notes" rows="4" required>{{ personality_notes or '' }}</textarea>
         <small>Ejemplo: ritmo de estudio, puntos fuertes, estilo de explicación preferido.</small>
       </div>
+
+      {% if llm_profiles %}
+        <div>
+          <label for="llm_profile">Perfil de VRAM para IA</label>
+          <select id="llm_profile" name="llm_profile" required>
+            {% for opt in llm_profiles %}
+              <option value="{{ opt.id }}" {% if opt.id == llm_profile %}selected{% endif %}>
+                {{ opt.label }} — {{ opt.chunk_tokens }} tokens, solape {{ opt.chunk_overlap }}, máx resumen {{ opt.summary_max_tokens }}
+              </option>
+            {% endfor %}
+          </select>
+          <small>Controla el tamaño de los fragmentos y la longitud del resumen según tu GPU.</small>
+        </div>
+      {% endif %}
 
       <ul class="nav-list" data-nav style="margin-top:16px;">
         <li>
