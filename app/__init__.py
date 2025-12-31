@@ -1882,6 +1882,7 @@ def create_app():
             manual_text = (request.form.get("manual_text") or "").strip()
             manual_mode = request.form.get("manual_mode") == "on"
             manual_file_mode = request.form.get("manual_file_mode") == "on"
+            auto_flashcards = request.form.get("auto_flashcards") == "on"
 
             uploads = [u for u in request.files.getlist("file") if u and u.filename]
             file_texts: list[str] = []
@@ -1970,10 +1971,10 @@ def create_app():
                 flash("Para usar IA sube un TXT, PDF o PPTX válido.", "error")
                 return redirect(url_for("add_notes"))
 
+            base_name = Path(filename or "input").stem
             if title.strip():
                 final_title = title.strip()
             else:
-                base_name = Path(filename or "input").stem
                 created_str = datetime.utcnow().date().isoformat()
                 exam_part = exam_date.isoformat() if exam_date else ""
                 final_title = f"{base_name} examen {exam_part} creado {created_str} ({selected_model})".strip()
@@ -2007,6 +2008,37 @@ def create_app():
                 )
             db.session.commit()
 
+            deck = None
+            if auto_flashcards:
+                deck_title = None
+                if exam_date:
+                    exam_row = (
+                        SubjectExam.query.filter_by(subject_id=subject.id, exam_date=exam_date)
+                        .order_by(SubjectExam.tema.asc())
+                        .first()
+                    )
+                    if exam_row and exam_row.tema:
+                        deck_title = exam_row.tema
+                if not deck_title:
+                    deck_title = title.strip() if title.strip() else base_name or final_title
+                deck = FlashcardDeck.query.filter_by(
+                    user_id=current_user.id,
+                    subject_id=subject.id,
+                    exam_date=exam_date,
+                    title=deck_title,
+                ).first()
+                if not deck:
+                    deck = FlashcardDeck(
+                        user_id=current_user.id,
+                        subject_id=subject.id,
+                        title=deck_title,
+                        exam_date=exam_date,
+                        source_note_id=note.id,
+                        flashcards=[],
+                    )
+                    db.session.add(deck)
+                    db.session.flush()
+
             for idx, chunk in enumerate(chunks):
                 job = Job(
                     user_id=current_user.id,
@@ -2025,9 +2057,38 @@ def create_app():
                     },
                 )
                 db.session.add(job)
+                if auto_flashcards and deck:
+                    db.session.add(
+                        Job(
+                            user_id=current_user.id,
+                            type="flashcards_ai_chunk",
+                            payload={
+                                "user_id": current_user.id,
+                                "note_id": note.id,
+                                "deck_id": deck.id,
+                                "model": selected_model,
+                                "count": FLASHCARD_CHUNK_DEFAULT,
+                                "chunk_index": idx,
+                                "total_chunks": len(chunks),
+                                "text": chunk,
+                            },
+                        )
+                    )
             db.session.commit()
 
-            flash(f"Resumen encolado en {len(chunks)} fragmento(s) ✅ Se irá completando a medida que procesamos cada parte.", "success")
+            if auto_flashcards and deck:
+                total_cards = len(chunks) * FLASHCARD_CHUNK_DEFAULT
+                flash(
+                    "Resumen encolado en "
+                    f"{len(chunks)} fragmento(s) ✅ Flashcards en cola: "
+                    f"{len(chunks)} × {FLASHCARD_CHUNK_DEFAULT} (total estimado {total_cards}).",
+                    "success",
+                )
+            else:
+                flash(
+                    f"Resumen encolado en {len(chunks)} fragmento(s) ✅ Se irá completando a medida que procesamos cada parte.",
+                    "success",
+                )
             return redirect(url_for("add_notes"))
 
         jobs = (

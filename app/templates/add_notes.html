@@ -73,6 +73,11 @@
         <label for="manual_file_mode" style="margin:0;">No procesar apuntes con IA</label>
       </div>
 
+      <div class="check-row">
+        <input type="checkbox" id="auto_flashcards" name="auto_flashcards" />
+        <label for="auto_flashcards" style="margin:0;">Generar flashcards automáticamente (IA)</label>
+      </div>
+
       <div id="manual-wrap" style="display:none;">
         <label for="manual_text">Contenido manual</label>
         <textarea id="manual_text" name="manual_text" rows="10" placeholder="Escribe aquí tus apuntes..."></textarea>
@@ -125,6 +130,7 @@
 
     const manualMode = document.getElementById("manual_mode");
     const manualFileMode = document.getElementById("manual_file_mode");
+    const autoFlashcards = document.getElementById("auto_flashcards");
     const manualWrap = document.getElementById("manual-wrap");
     const fileWrap = document.getElementById("file-wrap");
 
@@ -168,12 +174,17 @@
     function updateModeUI() {
       const isManual = manualMode.checked;
       const isManualFile = manualFileMode.checked;
+      const allowAuto = !isManual && !isManualFile;
       manualWrap.style.display = isManual ? "block" : "none";
       fileWrap.style.display = (isManual || isManualFile || !isManual) ? "block" : "block";
       // si marcamos manual_file_mode, desmarcamos manual_mode para evitar confusión de UI
       if (isManualFile) {
         manualMode.checked = false;
         manualWrap.style.display = "none";
+      }
+      if (autoFlashcards) {
+        autoFlashcards.disabled = !allowAuto;
+        if (!allowAuto) autoFlashcards.checked = false;
       }
     }
 
