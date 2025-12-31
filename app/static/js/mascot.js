@@ -331,7 +331,10 @@
           });
         });
       }
-      scheduleRefresh();
+      const llmBusyNow = typeof data.llm_busy === "boolean" ? data.llm_busy : llmBusy;
+      if (!llmBusyNow) {
+        scheduleRefresh();
+      }
     } catch (e) {
       // ignora errores de red
     }

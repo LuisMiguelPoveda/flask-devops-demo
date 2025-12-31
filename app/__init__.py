@@ -1719,9 +1719,9 @@ def create_app():
         except OperationalError as exc:
             db.session.rollback()
             if "database is locked" in str(exc).lower():
-                return jsonify({"jobs": []})
+                return jsonify({"jobs": [], "llm_busy": queue_has_work()})
             raise
-        return jsonify({"jobs": payload})
+        return jsonify({"jobs": payload, "llm_busy": queue_has_work()})
 
     # ---------- Ask Profe ----------
     @app.route("/ask-profe", methods=["GET", "POST"])
