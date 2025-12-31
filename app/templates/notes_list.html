@@ -44,7 +44,8 @@
       <p>No hay apuntes con esos filtros.</p>
     {% else %}
       {% for n in notes %}
-        <div class="card" style="margin-top: 1rem;">
+        {% set subject_color = n.subject.color or '#94a3b8' %}
+        <div class="card subject-tint" style="margin-top: 1rem; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
           <h3>{{ n.title }}</h3>
           <p>
             <strong>Asignatura:</strong> {{ n.subject.name }} |

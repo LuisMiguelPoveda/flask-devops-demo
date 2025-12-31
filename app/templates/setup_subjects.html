@@ -39,6 +39,14 @@
         <input data-subject-name placeholder="Ej: Matemáticas" required />
       </div>
 
+      <div>
+        <label>Color de la asignatura</label>
+        <div class="subject-color-row">
+          <input data-subject-color class="subject-color-input" type="color" value="#94a3b8" style="width:56px;height:40px;flex:0 0 auto;appearance:auto;-webkit-appearance:auto;background-color:#94a3b8;" />
+          <span class="subject-color-swatch" data-color-swatch style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(0,0,0,.18);"></span>
+        </div>
+      </div>
+
       <div data-exams style="display:grid; gap:10px;"></div>
 
       <button type="button" data-add-exam style="width:fit-content;">+ Añadir examen</button>
@@ -68,6 +76,7 @@
     const addSubjectBtn = document.getElementById("add-subject-btn");
     const form = document.getElementById("subjects-form");
     const payloadInput = document.getElementById("subjects_payload");
+    const defaultColor = "#94a3b8";
 
     function updateSubjectTitles() {
       const blocks = Array.from(subjectsRoot.querySelectorAll("[data-subject]"));
@@ -89,6 +98,10 @@
       if (data.tema) temaInput.value = data.tema;
 
       removeBtn.addEventListener("click", () => {
+        const ok = confirm(
+          "Vas a eliminar este tema/examen. Al guardar, se borrarán sus apuntes y flashcards asociados. Esta acción no se puede deshacer. ¿Continuar?"
+        );
+        if (!ok) return;
         examEl.remove();
       });
 
@@ -99,15 +112,35 @@
       const fragment = subjectTemplate.content.cloneNode(true);
       const subjectEl = fragment.querySelector("[data-subject]");
       const nameInput = subjectEl.querySelector("[data-subject-name]");
+      const colorInput = subjectEl.querySelector("[data-subject-color]");
+      const swatch = subjectEl.querySelector("[data-color-swatch]");
       const examsRoot = subjectEl.querySelector("[data-exams]");
       const addExamBtn = subjectEl.querySelector("[data-add-exam]");
       const removeSubjectBtn = subjectEl.querySelector("[data-remove-subject]");
 
       if (data.id) subjectEl.dataset.subjectId = data.id;
       if (data.name) nameInput.value = data.name;
+      function syncSwatch() {
+        if (!colorInput || !swatch) return;
+        const color = colorInput.value || defaultColor;
+        swatch.style.setProperty("--swatch-color", color);
+        swatch.style.backgroundColor = color;
+        colorInput.style.backgroundColor = color;
+      }
+      if (colorInput) {
+        colorInput.value = data.color || defaultColor;
+        syncSwatch();
+      }
+      if (colorInput && swatch) {
+        colorInput.addEventListener("input", syncSwatch);
+      }
 
       addExamBtn.addEventListener("click", () => addExam(examsRoot));
       removeSubjectBtn.addEventListener("click", () => {
+        const ok = confirm(
+          "Vas a eliminar esta asignatura. Al guardar, se borrarán sus temas/exámenes, apuntes y flashcards asociados. Esta acción no se puede deshacer. ¿Continuar?"
+        );
+        if (!ok) return;
         subjectEl.remove();
         updateSubjectTitles();
       });
@@ -127,6 +160,7 @@
         const subjects = [];
         subjectsRoot.querySelectorAll("[data-subject]").forEach((subjectEl) => {
           const name = subjectEl.querySelector("[data-subject-name]").value.trim();
+          const color = subjectEl.querySelector("[data-subject-color]").value;
           const subjectId = subjectEl.dataset.subjectId;
           const exams = [];
           subjectEl.querySelectorAll("[data-exam]").forEach((examEl) => {
@@ -137,7 +171,7 @@
             if (examId) payload.id = Number(examId);
             exams.push(payload);
           });
-          const subjectPayload = { name, exams };
+          const subjectPayload = { name, color, exams };
           if (subjectId) subjectPayload.id = Number(subjectId);
           subjects.push(subjectPayload);
         });

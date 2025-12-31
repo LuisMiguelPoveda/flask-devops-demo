@@ -25,6 +25,7 @@ class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     name = db.Column(db.String(120), nullable=False)
+    color = db.Column(db.String(7), nullable=True)
 
     user = db.relationship("User", back_populates="subjects")
     notes = db.relationship("Note", back_populates="subject", cascade="all, delete-orphan")

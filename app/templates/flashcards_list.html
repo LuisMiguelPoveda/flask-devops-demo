@@ -105,10 +105,11 @@
       <div class="card"><p>No hay decks con esos filtros.</p></div>
     {% else %}
       {% for d in decks %}
-        <div class="card" style="margin-bottom:14px;">
+        {% set subject_color = d.subject.color or '#94a3b8' %}
+        <div class="card subject-tint" style="margin-bottom:14px; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
             <div>
-              <h3 style="margin:0;">{{ d.title }}</h3>
+              <h3 style="margin:0;">{{ d.subject.name }}: {{ d.title }}</h3>
               <p style="margin:4px 0 0 0;">
                 <strong>Asignatura:</strong> {{ d.subject.name }} |
                 <strong>Fecha de examen:</strong> {{ d.exam_date if d.exam_date else "—" }} |
@@ -127,7 +128,7 @@
               </div>
               <div style="display:grid;gap:10px;margin-top:10px;">
                 {% for card in d.flashcards %}
-                  <div class="card" data-flashcard-card style="padding:10px;background:rgba(0,0,0,0.06);">
+                  <div class="card subject-tint subject-tint--soft" data-flashcard-card style="padding:10px; border-left:4px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), {{ subject_color }};">
                     <strong>Q{{ loop.index }}.</strong> {{ card.question }}
                     <ol style="margin:8px 0 0 16px;padding:0;">
                       {% for opt in card.options %}

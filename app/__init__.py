@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import math
+import re
 import tempfile
 import fcntl
 import uuid
@@ -17,7 +18,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 from pptx import Presentation
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
@@ -49,12 +50,17 @@ from .models import (
 ALLOWED_EXTENSIONS = {"txt", "pdf", "pptx"}
 # Permitimos hasta ~50 MB por archivo
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_SUMMARY_TOKENS = 1200
+SUMMARY_MIN_TOKENS = 120
+SUMMARY_TOKEN_RATIO = 0.3
 FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
 FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
 LLM_OFFLINE_LABEL = "Motor LLM no encontrado"
+HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
 _worker_lock_handle = None
+JOB_RETRY_SECONDS = 30
 
 
 def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 500) -> list[str]:
@@ -80,6 +86,23 @@ def chunk_text_with_overlap(text: str, max_tokens: int = 3000, overlap: int = 50
             break
         start += step
     return chunks
+
+
+def estimate_summary_max_tokens(text: str) -> int:
+    word_count = len((text or "").split())
+    target = int(word_count * SUMMARY_TOKEN_RATIO)
+    if target <= 0:
+        target = SUMMARY_MIN_TOKENS
+    return max(SUMMARY_MIN_TOKENS, min(MAX_SUMMARY_TOKENS, target))
+
+
+def normalize_subject_color(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    return value if HEX_COLOR_RE.match(value) else None
 
 
 def build_note_chunks_map(user_id: int, notes: list[Note], max_tokens: int = 3000, overlap: int = 500) -> dict[int, dict]:
@@ -311,12 +334,21 @@ def fetch_models(app):
         return [LLM_OFFLINE_LABEL]
 
 
-def lmstudio_chat(app, model: str, messages: list[dict], response_format: dict | None = None, temperature: float = 0.4) -> str:
+def lmstudio_chat(
+    app,
+    model: str,
+    messages: list[dict],
+    response_format: dict | None = None,
+    max_tokens: int | None = None,
+    temperature: float = 0.4,
+) -> str:
     api_base = app.config["LMSTUDIO_API_BASE"].rstrip("/")
     timeout_s = app.config["LMSTUDIO_TIMEOUT"]
     payload = {"model": model, "messages": messages, "temperature": temperature}
     if response_format:
         payload["response_format"] = response_format
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
     resp = requests.post(f"{api_base}/chat/completions", json=payload, timeout=timeout_s)
     resp.raise_for_status()
     data = resp.json()
@@ -328,7 +360,8 @@ def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date
         "Eres un profesor experto. Devuelve solo el resumen, sin frases introductorias ni notas sobre tu respuesta. "
         "Usa el idioma predominante del texto; si está en español o no hay predominio claro, responde en español. "
         "Mantén un único idioma coherente en todo el resumen, en formato de viñetas claras y concisas. "
-        "No inventes información, no mezcles idiomas, no menciones fragmentos, cortes ni títulos añadidos, y no incluyas introducción ni despedida."
+        "No inventes información, no mezcles idiomas, no menciones fragmentos, cortes ni títulos añadidos, y no incluyas introducción ni despedida. "
+        "No copies el texto original ni repitas frases largas. Máximo 12 viñetas (si el texto es breve, menos) y usa '-' al inicio de cada viñeta."
     )
     chunk_meta_line = ""
     if total_chunks and total_chunks > 1:
@@ -342,10 +375,12 @@ def lmstudio_summarize_text(app, model: str, subject: str, title: str, exam_date
         f"{chunk_meta_line}\n\n"
         f"TEXTO A RESUMIR:\n{text}"
     )
+    max_tokens = estimate_summary_max_tokens(text)
     return lmstudio_chat(
         app,
         model,
         [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+        max_tokens=max_tokens,
     )
 
 
@@ -468,135 +503,133 @@ def process_job(app, job: Job):
                 if not file_path or not os.path.exists(file_path):
                     return "error", None, "Archivo subido no encontrado."
 
-                try:
-                    subject = Subject.query.filter_by(id=subject_id, user_id=user_id).first()
-                    if not subject:
-                        return "error", None, "Asignatura inválida para el archivo."
-                    exam = SubjectExam.query.filter_by(id=exam_id, subject_id=subject.id).first()
-                    if not exam:
-                        return "error", None, "Examen inválido para el archivo."
+                subject = Subject.query.filter_by(id=subject_id, user_id=user_id).first()
+                if not subject:
+                    return "error", None, "Asignatura inválida para el archivo."
+                exam = SubjectExam.query.filter_by(id=exam_id, subject_id=subject.id).first()
+                if not exam:
+                    return "error", None, "Examen inválido para el archivo."
 
-                    file_size = os.path.getsize(file_path)
-                    if file_size == 0:
-                        return "error", None, "El archivo está vacío."
-                    if file_size > MAX_UPLOAD_BYTES:
-                        return "error", None, f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB."
+                file_size = os.path.getsize(file_path)
+                if file_size == 0:
+                    return "error", None, "El archivo está vacío."
+                if file_size > MAX_UPLOAD_BYTES:
+                    return "error", None, f"Archivo demasiado grande. Máximo {MAX_UPLOAD_BYTES // 1024} KB."
 
-                    with open(file_path, "rb") as handle:
-                        file_bytes = handle.read()
-                    if not file_bytes:
-                        return "error", None, "El archivo está vacío."
+                with open(file_path, "rb") as handle:
+                    file_bytes = handle.read()
+                if not file_bytes:
+                    return "error", None, "El archivo está vacío."
 
-                    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
-                    if ext == "pdf":
-                        file_mime = content_type or "application/pdf"
-                        file_text = extract_pdf_text(file_bytes)
-                    elif ext == "pptx":
-                        file_mime = (
-                            content_type
-                            or "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                        )
-                        file_text = extract_pptx_text(file_bytes)
-                    else:
-                        file_mime = content_type or "text/plain"
-                        try:
-                            file_text = file_bytes.decode("utf-8")
-                        except UnicodeDecodeError:
-                            file_text = file_bytes.decode("utf-8", errors="ignore")
-                    file_text = (file_text or "").strip()
-                    if not file_text:
-                        return "error", None, "El archivo no contiene texto legible."
-                    chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
-                    if not chunks:
-                        return "error", None, "No se pudo dividir el texto para IA."
+                ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+                if ext == "pdf":
+                    file_mime = content_type or "application/pdf"
+                    file_text = extract_pdf_text(file_bytes)
+                elif ext == "pptx":
+                    file_mime = (
+                        content_type
+                        or "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                    file_text = extract_pptx_text(file_bytes)
+                else:
+                    file_mime = content_type or "text/plain"
+                    try:
+                        file_text = file_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        file_text = file_bytes.decode("utf-8", errors="ignore")
+                file_text = (file_text or "").strip()
+                if not file_text:
+                    return "error", None, "El archivo no contiene texto legible."
+                chunks = chunk_text_with_overlap(file_text, max_tokens=3000, overlap=500)
+                if not chunks:
+                    return "error", None, "No se pudo dividir el texto para IA."
 
-                    exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
-                    base_name = Path(filename).stem if filename else subject.name
-                    note_title = f"{exam.tema} - {base_name}".strip(" -")
-                    if exam_date_str != "No indicada":
-                        note_title = f"{note_title} ({exam_date_str})"
-                    deck_title = exam.tema
-                    if exam_date_str != "No indicada":
-                        deck_title = f"{deck_title} ({exam_date_str})"
+                exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
+                base_name = Path(filename).stem if filename else subject.name
+                note_title = f"{exam.tema} - {base_name}".strip(" -")
+                if exam_date_str != "No indicada":
+                    note_title = f"{note_title} ({exam_date_str})"
+                deck_title = exam.tema
+                if exam_date_str != "No indicada":
+                    deck_title = f"{deck_title} ({exam_date_str})"
 
-                    note = Note(
+                note = Note(
+                    user_id=user_id,
+                    subject_id=subject.id,
+                    title=note_title,
+                    exam_date=exam.exam_date,
+                    original_filename=filename,
+                    content=f"{note_title}\n\n",
+                    ai_used=True,
+                )
+                db.session.add(note)
+                db.session.flush()
+                db.session.add(
+                    NoteSourceFile(
+                        note_id=note.id,
+                        filename=filename or "input.txt",
+                        content_type=file_mime or "application/octet-stream",
+                        data=file_bytes,
+                    )
+                )
+
+                deck = FlashcardDeck.query.filter_by(
+                    user_id=user_id,
+                    subject_id=subject.id,
+                    exam_date=exam.exam_date,
+                    title=deck_title,
+                ).first()
+                if not deck:
+                    deck = FlashcardDeck(
                         user_id=user_id,
                         subject_id=subject.id,
-                        title=note_title,
-                        exam_date=exam.exam_date,
-                        original_filename=filename,
-                        content=f"{note_title}\n\n",
-                        ai_used=True,
-                    )
-                    db.session.add(note)
-                    db.session.flush()
-                    db.session.add(
-                        NoteSourceFile(
-                            note_id=note.id,
-                            filename=filename or "input.txt",
-                            content_type=file_mime or "application/octet-stream",
-                            data=file_bytes,
-                        )
-                    )
-
-                    deck = FlashcardDeck.query.filter_by(
-                        user_id=user_id,
-                        subject_id=subject.id,
-                        exam_date=exam.exam_date,
                         title=deck_title,
-                    ).first()
-                    if not deck:
-                        deck = FlashcardDeck(
-                            user_id=user_id,
-                            subject_id=subject.id,
-                            title=deck_title,
-                            exam_date=exam.exam_date,
-                            source_note_id=note.id,
-                            flashcards=[],
-                        )
-                        db.session.add(deck)
-                        db.session.flush()
+                        exam_date=exam.exam_date,
+                        source_note_id=note.id,
+                        flashcards=[],
+                    )
+                    db.session.add(deck)
+                    db.session.flush()
 
-                    for idx, chunk in enumerate(chunks):
-                        db.session.add(
-                            Job(
-                                user_id=user_id,
-                                type="note_ai_chunk",
-                                payload={
-                                    "user_id": user_id,
-                                    "subject_id": subject.id,
-                                    "note_id": note.id,
-                                    "title": note_title,
-                                    "exam_date": exam_date_str,
-                                    "filename": filename or "input.txt",
-                                    "text": chunk,
-                                    "model": model,
-                                    "chunk_index": idx,
-                                    "total_chunks": len(chunks),
-                                },
-                            )
+                for idx, chunk in enumerate(chunks):
+                    db.session.add(
+                        Job(
+                            user_id=user_id,
+                            type="note_ai_chunk",
+                            payload={
+                                "user_id": user_id,
+                                "subject_id": subject.id,
+                                "note_id": note.id,
+                                "title": note_title,
+                                "exam_date": exam_date_str,
+                                "filename": filename or "input.txt",
+                                "text": chunk,
+                                "model": model,
+                                "chunk_index": idx,
+                                "total_chunks": len(chunks),
+                            },
                         )
-                        db.session.add(
-                            Job(
-                                user_id=user_id,
-                                type="flashcards_ai_chunk",
-                                payload={
-                                    "user_id": user_id,
-                                    "note_id": note.id,
-                                    "deck_id": deck.id,
-                                    "model": model,
-                                    "count": FLASHCARD_CHUNK_DEFAULT,
-                                    "chunk_index": idx,
-                                    "total_chunks": len(chunks),
-                                    "text": chunk,
-                                },
-                            )
+                    )
+                    db.session.add(
+                        Job(
+                            user_id=user_id,
+                            type="flashcards_ai_chunk",
+                            payload={
+                                "user_id": user_id,
+                                "note_id": note.id,
+                                "deck_id": deck.id,
+                                "model": model,
+                                "count": FLASHCARD_CHUNK_DEFAULT,
+                                "chunk_index": idx,
+                                "total_chunks": len(chunks),
+                                "text": chunk,
+                            },
                         )
-                    db.session.commit()
-                    return "success", f"Archivo procesado: {filename}", None
-                finally:
-                    if file_path and os.path.exists(file_path):
-                        os.remove(file_path)
+                    )
+                db.session.commit()
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                return "success", f"Archivo procesado: {filename}", None
 
             if job.type == "note_ai":
                 payload = job.payload or {}
@@ -755,6 +788,9 @@ def process_job(app, job: Job):
 def create_app():
     app = Flask(__name__)
 
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+    app.jinja_env.auto_reload = True
+
     os.makedirs(app.instance_path, exist_ok=True)
     upload_dir = os.getenv("UPLOAD_DIR") or os.path.join(app.instance_path, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
@@ -876,6 +912,19 @@ def create_app():
         db_lock = acquire_process_lock("flask-devops-demo-db-init.lock", blocking=True)
         try:
             db.create_all()
+            if db_uri.startswith("sqlite"):
+                try:
+                    with db.engine.connect() as conn:
+                        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(subjects)"))]
+                        if "color" not in cols:
+                            conn.execute(text("ALTER TABLE subjects ADD COLUMN color VARCHAR(7)"))
+                            conn.execute(text("UPDATE subjects SET color = '#94a3b8' WHERE color IS NULL OR color = ''"))
+                            conn.commit()
+                        else:
+                            conn.execute(text("UPDATE subjects SET color = '#94a3b8' WHERE color IS NULL OR color = ''"))
+                            conn.commit()
+                except Exception as exc:
+                    app.logger.warning("No se pudo añadir la columna color en subjects: %s", exc)
         except Exception as exc:
             message = str(exc).lower()
             if "already exists" not in message:
@@ -891,29 +940,58 @@ def create_app():
                 _worker_lock_handle = acquire_process_lock("flask-devops-demo-worker.lock", blocking=False)
             if _worker_lock_handle:
                 def worker_loop():
+                    retry_job_id = None
+                    retry_at = None
                     while True:
                         with app.app_context():
                             try:
                                 if get_active_profe_lock():
                                     time.sleep(2)
                                     continue
-                                job = (
-                                    Job.query.filter_by(status="pending")
-                                    .order_by(Job.created_at.asc(), Job.id.asc())
-                                    .first()
-                                )
+
+                                job = None
+                                if retry_job_id:
+                                    now = time.time()
+                                    if retry_at and now < retry_at:
+                                        time.sleep(min(2, retry_at - now))
+                                        continue
+                                    job = Job.query.filter_by(id=retry_job_id).first()
+                                    if not job:
+                                        retry_job_id = None
+                                        retry_at = None
+                                        time.sleep(1)
+                                        continue
                                 if not job:
-                                    time.sleep(2)
-                                    continue
+                                    job = (
+                                        Job.query.filter_by(status="pending")
+                                        .order_by(Job.created_at.asc(), Job.id.asc())
+                                        .first()
+                                    )
+                                    if not job:
+                                        time.sleep(2)
+                                        continue
+
                                 job.status = "running"
                                 db.session.commit()
 
                                 status, msg, err = process_job(app, job)
+                                if status == "error":
+                                    job.status = "pending"
+                                    job.result_message = None
+                                    job.error_message = err
+                                    job.updated_at = datetime.utcnow()
+                                    db.session.commit()
+                                    retry_job_id = job.id
+                                    retry_at = time.time() + JOB_RETRY_SECONDS
+                                    continue
+
                                 job.status = status
                                 job.result_message = msg
                                 job.error_message = err
                                 job.updated_at = datetime.utcnow()
                                 db.session.commit()
+                                retry_job_id = None
+                                retry_at = None
                             except OperationalError as exc:
                                 db.session.rollback()
                                 if "database is locked" in str(exc).lower():
@@ -1097,7 +1175,9 @@ def create_app():
                         exams = subj.get("exams") if isinstance(subj, dict) else []
                         if not isinstance(exams, list):
                             exams = []
-                        subject_seed = {"id": subject_id, "name": name, "exams": []}
+                        color_raw = (subj.get("color") or "").strip() if isinstance(subj, dict) else ""
+                        color = color_raw
+                        subject_seed = {"id": subject_id, "name": name, "color": color, "exams": []}
 
                         subject_has_content = bool(name)
                         for exam in exams:
@@ -1121,6 +1201,9 @@ def create_app():
 
                         if not name:
                             errors.append("Cada asignatura necesita un nombre.")
+                            continue
+                        if color and not HEX_COLOR_RE.match(color):
+                            errors.append(f"Color inválido en \"{name}\".")
                             continue
                         lowered = name.lower()
                         if lowered in seen_names:
@@ -1163,7 +1246,7 @@ def create_app():
                             seen_exam_keys.add(exam_key)
                             exam_entries.append({"id": exam_id, "date": exam_date, "tema": tema})
 
-                        subjects_clean.append({"id": subject_id, "name": name, "exams": exam_entries})
+                        subjects_clean.append({"id": subject_id, "name": name, "color": color, "exams": exam_entries})
 
             if errors:
                 for err in errors:
@@ -1198,8 +1281,13 @@ def create_app():
                     subject = existing_subjects_by_id.get(subject_id) if subject_id else None
                     if subject:
                         subject.name = subj["name"]
+                        subject.color = normalize_subject_color(subj.get("color"))
                     else:
-                        subject = Subject(user_id=current_user.id, name=subj["name"])
+                        subject = Subject(
+                            user_id=current_user.id,
+                            name=subj["name"],
+                            color=normalize_subject_color(subj.get("color")),
+                        )
                         db.session.add(subject)
                         db.session.flush()
                     incoming_subject_ids.add(subject.id)
@@ -1270,6 +1358,7 @@ def create_app():
                     {
                         "id": subject.id,
                         "name": subject.name,
+                        "color": subject.color or "",
                         "exams": [
                             {
                                 "id": exam.id,
@@ -1744,14 +1833,22 @@ def create_app():
 
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
+            new_subject_color = (request.form.get("new_subject_color") or "").strip()
 
             if subject_choice == "__new__":
                 if not new_subject_name:
                     flash("Escribe el nombre de la nueva asignatura.", "error")
                     return redirect(url_for("add_notes"))
+                if new_subject_color and not HEX_COLOR_RE.match(new_subject_color):
+                    flash("Color de asignatura inválido.", "error")
+                    return redirect(url_for("add_notes"))
                 subject = Subject.query.filter_by(user_id=current_user.id, name=new_subject_name).first()
                 if not subject:
-                    subject = Subject(user_id=current_user.id, name=new_subject_name)
+                    subject = Subject(
+                        user_id=current_user.id,
+                        name=new_subject_name,
+                        color=normalize_subject_color(new_subject_color),
+                    )
                     db.session.add(subject)
                     db.session.commit()
             else:
@@ -2218,15 +2315,23 @@ def create_app():
 
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
+            new_subject_color = (request.form.get("new_subject_color") or "").strip()
 
             if not target_deck:
                 if subject_choice == "__new__":
                     if not new_subject_name:
                         flash("Escribe el nombre de la nueva asignatura.", "error")
                         return redirect(url_for("flashcards_create"))
+                    if new_subject_color and not HEX_COLOR_RE.match(new_subject_color):
+                        flash("Color de asignatura inválido.", "error")
+                        return redirect(url_for("flashcards_create"))
                     subject = Subject.query.filter_by(user_id=current_user.id, name=new_subject_name).first()
                     if not subject:
-                        subject = Subject(user_id=current_user.id, name=new_subject_name)
+                        subject = Subject(
+                            user_id=current_user.id,
+                            name=new_subject_name,
+                            color=normalize_subject_color(new_subject_color),
+                        )
                         db.session.add(subject)
                         db.session.commit()
                 else:

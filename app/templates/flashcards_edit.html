@@ -51,7 +51,8 @@
     <div class="loading-banner" id="ai-append-loading">Generando y añadiendo flashcards... ⏳</div>
   </div>
 
-  <div class="card" style="padding:16px;">
+  {% set subject_color = deck.subject.color or '#94a3b8' %}
+  <div class="card subject-tint" style="padding:16px; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
     <form method="post" id="edit-form">
       <input type="hidden" name="mode" value="manual" />
       <div>
@@ -78,7 +79,7 @@
       <div id="cards">
         {% for c in deck.flashcards %}
           {% set card_idx = loop.index0 %}
-          <div class="card" data-card style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+          <div class="card subject-tint subject-tint--soft" data-card style="padding:12px; margin-top:12px; border-left:4px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), {{ subject_color }};">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
               <strong>Flashcard {{ loop.index }}</strong>
               <button type="button" class="link-pill" data-remove-card style="background:#fee2e2;color:#991b1b;">Eliminar</button>
@@ -118,7 +119,7 @@
         <select class="input" name="merge_deck_id" required>
           <option value="">(elige uno)</option>
           {% for d in other_decks %}
-            <option value="{{ d.id }}">{{ d.title }} — {{ d.subject.name }} ({{ d.flashcards|length }} cards)</option>
+            <option value="{{ d.id }}">{{ d.subject.name }}: {{ d.title }} ({{ d.flashcards|length }} cards)</option>
           {% endfor %}
         </select>
         <p class="subtle">Se añadirán todas las flashcards del deck elegido a este deck.</p>
@@ -150,9 +151,11 @@
   const aiBtn = document.getElementById("ai-append-btn");
   const aiLoading = document.getElementById("ai-append-loading");
 
+  const subjectColor = "{{ subject_color }}";
+
   function newCardHtml(i) {
     return `
-      <div class="card" data-card style="padding:12px; margin-top:12px; background: rgba(0,0,0,0.25);">
+      <div class="card subject-tint subject-tint--soft" data-card style="padding:12px; margin-top:12px; border-left:4px solid ${subjectColor}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), ${subjectColor};">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
           <strong>Flashcard ${i + 1}</strong>
           <button type="button" class="link-pill" data-remove-card style="background:#fee2e2;color:#991b1b;">Eliminar</button>
