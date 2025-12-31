@@ -35,7 +35,7 @@
             <select name="deck_id">
               <option value="">Crear nuevo deck</option>
               {% for d in decks %}
-                <option value="{{ d.id }}">{{ d.subject.name }}: {{ d.title }} ({{ d.flashcards|length }} cards)</option>
+                <option value="{{ d.id }}">{{ d.subject.name }}: {{ deck_display_title(d.title, d.exam_date) }} ({{ d.flashcards|length }} cards)</option>
               {% endfor %}
             </select>
           </label>
@@ -93,7 +93,7 @@
             <select id="manual_deck_id" name="deck_id">
               <option value="">Crear nuevo deck</option>
               {% for d in decks %}
-                <option value="{{ d.id }}">{{ d.subject.name }}: {{ d.title }} ({{ d.flashcards|length }} cards)</option>
+                <option value="{{ d.id }}">{{ d.subject.name }}: {{ deck_display_title(d.title, d.exam_date) }} ({{ d.flashcards|length }} cards)</option>
               {% endfor %}
             </select>
           </div>
@@ -113,10 +113,7 @@
               <label for="new_subject_name">Nueva asignatura</label>
               <input id="new_subject_name" name="new_subject_name" placeholder="Ej: Anatomía" />
               <label for="new_subject_color">Color de la asignatura</label>
-              <div class="subject-color-row">
-                <input id="new_subject_color" name="new_subject_color" class="subject-color-input" type="color" value="#94a3b8" style="width:56px;height:40px;flex:0 0 auto;appearance:auto;-webkit-appearance:auto;background-color:#94a3b8;" />
-                <span class="subject-color-swatch" id="new_subject_swatch" style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(0,0,0,.18);"></span>
-              </div>
+              <input id="new_subject_color" name="new_subject_color" type="color" value="#94a3b8" />
             </div>
 
             <div>
@@ -176,7 +173,6 @@
     const newWrap = document.getElementById("new-subject-wrap");
     const newInput = document.getElementById("new_subject_name");
     const newColor = document.getElementById("new_subject_color");
-    const newSwatch = document.getElementById("new_subject_swatch");
     const defaultColor = "#94a3b8";
     const aiForm = document.getElementById("ai-create-form");
     const aiBtn = document.getElementById("ai-create-btn");
@@ -194,7 +190,6 @@
       if (!isNew) {
         newInput.value = "";
         if (newColor) newColor.value = defaultColor;
-        if (newSwatch) newSwatch.style.setProperty("--swatch-color", defaultColor);
       }
     }
 
@@ -231,17 +226,6 @@
         aiBtn.textContent = "Generando...";
         aiLoading.style.display = "block";
       });
-    }
-
-    if (newColor && newSwatch) {
-      const syncSwatch = () => {
-        const color = newColor.value || defaultColor;
-        newSwatch.style.setProperty("--swatch-color", color);
-        newSwatch.style.backgroundColor = color;
-        newColor.style.backgroundColor = color;
-      };
-      syncSwatch();
-      newColor.addEventListener("input", syncSwatch);
     }
 
     if (manualDeck) {

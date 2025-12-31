@@ -41,10 +41,7 @@
 
       <div>
         <label>Color de la asignatura</label>
-        <div class="subject-color-row">
-          <input data-subject-color class="subject-color-input" type="color" value="#94a3b8" style="width:56px;height:40px;flex:0 0 auto;appearance:auto;-webkit-appearance:auto;background-color:#94a3b8;" />
-          <span class="subject-color-swatch" data-color-swatch style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(0,0,0,.18);"></span>
-        </div>
+        <input data-subject-color type="color" value="#94a3b8" />
       </div>
 
       <div data-exams style="display:grid; gap:10px;"></div>
@@ -113,26 +110,14 @@
       const subjectEl = fragment.querySelector("[data-subject]");
       const nameInput = subjectEl.querySelector("[data-subject-name]");
       const colorInput = subjectEl.querySelector("[data-subject-color]");
-      const swatch = subjectEl.querySelector("[data-color-swatch]");
       const examsRoot = subjectEl.querySelector("[data-exams]");
       const addExamBtn = subjectEl.querySelector("[data-add-exam]");
       const removeSubjectBtn = subjectEl.querySelector("[data-remove-subject]");
 
       if (data.id) subjectEl.dataset.subjectId = data.id;
       if (data.name) nameInput.value = data.name;
-      function syncSwatch() {
-        if (!colorInput || !swatch) return;
-        const color = colorInput.value || defaultColor;
-        swatch.style.setProperty("--swatch-color", color);
-        swatch.style.backgroundColor = color;
-        colorInput.style.backgroundColor = color;
-      }
       if (colorInput) {
         colorInput.value = data.color || defaultColor;
-        syncSwatch();
-      }
-      if (colorInput && swatch) {
-        colorInput.addEventListener("input", syncSwatch);
       }
 
       addExamBtn.addEventListener("click", () => addExam(examsRoot));

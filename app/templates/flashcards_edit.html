@@ -66,7 +66,7 @@
 
       <div style="margin-top:10px;">
         <label class="label">Título</label>
-        <input class="input" name="title" value="{{ deck.title }}" required />
+        <input class="input" name="title" value="{{ deck_display_title(deck.title, deck.exam_date) }}" required />
       </div>
 
       <div style="margin-top:10px;">
@@ -119,7 +119,7 @@
         <select class="input" name="merge_deck_id" required>
           <option value="">(elige uno)</option>
           {% for d in other_decks %}
-            <option value="{{ d.id }}">{{ d.subject.name }}: {{ d.title }} ({{ d.flashcards|length }} cards)</option>
+            <option value="{{ d.id }}">{{ d.subject.name }}: {{ deck_display_title(d.title, d.exam_date) }} ({{ d.flashcards|length }} cards)</option>
           {% endfor %}
         </select>
         <p class="subtle">Se añadirán todas las flashcards del deck elegido a este deck.</p>

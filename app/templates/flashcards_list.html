@@ -109,7 +109,7 @@
         <div class="card subject-tint" style="margin-bottom:14px; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
             <div>
-              <h3 style="margin:0;">{{ d.subject.name }}: {{ d.title }}</h3>
+              <h3 style="margin:0;">{{ d.subject.name }}: {{ deck_display_title(d.title, d.exam_date) }}</h3>
               <p style="margin:4px 0 0 0;">
                 <strong>Asignatura:</strong> {{ d.subject.name }} |
                 <strong>Fecha de examen:</strong> {{ d.exam_date if d.exam_date else "—" }} |

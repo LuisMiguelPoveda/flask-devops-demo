@@ -18,7 +18,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 from pptx import Presentation
-from sqlalchemy import event, text
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
@@ -50,9 +50,9 @@ from .models import (
 ALLOWED_EXTENSIONS = {"txt", "pdf", "pptx"}
 # Permitimos hasta ~50 MB por archivo
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-MAX_SUMMARY_TOKENS = 1200
+MAX_SUMMARY_TOKENS = 5000
 SUMMARY_MIN_TOKENS = 120
-SUMMARY_TOKEN_RATIO = 0.3
+SUMMARY_TOKEN_RATIO = 0.6
 FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
 FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
 LLM_OFFLINE_LABEL = "Motor LLM no encontrado"
@@ -550,8 +550,6 @@ def process_job(app, job: Job):
                 if exam_date_str != "No indicada":
                     note_title = f"{note_title} ({exam_date_str})"
                 deck_title = exam.tema
-                if exam_date_str != "No indicada":
-                    deck_title = f"{deck_title} ({exam_date_str})"
 
                 note = Note(
                     user_id=user_id,
@@ -788,9 +786,6 @@ def process_job(app, job: Job):
 def create_app():
     app = Flask(__name__)
 
-    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
-    app.jinja_env.auto_reload = True
-
     os.makedirs(app.instance_path, exist_ok=True)
     upload_dir = os.getenv("UPLOAD_DIR") or os.path.join(app.instance_path, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
@@ -880,6 +875,19 @@ def create_app():
             return {"profe_busy": False, "llm_busy": False}
         return {"profe_busy": profe_is_busy(current_user.id), "llm_busy": queue_has_work()}
 
+    @app.context_processor
+    def inject_deck_helpers():
+        def deck_display_title(title: str | None, exam_date) -> str:
+            if not title:
+                return ""
+            if exam_date:
+                suffix = f" ({exam_date})"
+                if title.endswith(suffix):
+                    return title[: -len(suffix)].rstrip()
+            return title
+
+        return {"deck_display_title": deck_display_title}
+
     @app.before_request
     def enforce_setup_completion():
         if not current_user.is_authenticated:
@@ -912,19 +920,6 @@ def create_app():
         db_lock = acquire_process_lock("flask-devops-demo-db-init.lock", blocking=True)
         try:
             db.create_all()
-            if db_uri.startswith("sqlite"):
-                try:
-                    with db.engine.connect() as conn:
-                        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(subjects)"))]
-                        if "color" not in cols:
-                            conn.execute(text("ALTER TABLE subjects ADD COLUMN color VARCHAR(7)"))
-                            conn.execute(text("UPDATE subjects SET color = '#94a3b8' WHERE color IS NULL OR color = ''"))
-                            conn.commit()
-                        else:
-                            conn.execute(text("UPDATE subjects SET color = '#94a3b8' WHERE color IS NULL OR color = ''"))
-                            conn.commit()
-                except Exception as exc:
-                    app.logger.warning("No se pudo añadir la columna color en subjects: %s", exc)
         except Exception as exc:
             message = str(exc).lower()
             if "already exists" not in message:
@@ -1172,14 +1167,19 @@ def create_app():
                             except (TypeError, ValueError):
                                 subject_id = None
                         name = (subj.get("name") or "").strip()
+                        color_raw = (subj.get("color") or "").strip()
+                        color = normalize_subject_color(color_raw)
                         exams = subj.get("exams") if isinstance(subj, dict) else []
                         if not isinstance(exams, list):
                             exams = []
-                        color_raw = (subj.get("color") or "").strip() if isinstance(subj, dict) else ""
-                        color = color_raw
-                        subject_seed = {"id": subject_id, "name": name, "color": color, "exams": []}
+                        subject_seed = {
+                            "id": subject_id,
+                            "name": name,
+                            "color": color or color_raw,
+                            "exams": [],
+                        }
 
-                        subject_has_content = bool(name)
+                        subject_has_content = bool(name or color_raw)
                         for exam in exams:
                             raw_exam_id = exam.get("id") if isinstance(exam, dict) else None
                             exam_id = None
@@ -1202,8 +1202,8 @@ def create_app():
                         if not name:
                             errors.append("Cada asignatura necesita un nombre.")
                             continue
-                        if color and not HEX_COLOR_RE.match(color):
-                            errors.append(f"Color inválido en \"{name}\".")
+                        if color_raw and not color:
+                            errors.append(f'Color inválido en "{name}".')
                             continue
                         lowered = name.lower()
                         if lowered in seen_names:
@@ -1246,7 +1246,9 @@ def create_app():
                             seen_exam_keys.add(exam_key)
                             exam_entries.append({"id": exam_id, "date": exam_date, "tema": tema})
 
-                        subjects_clean.append({"id": subject_id, "name": name, "color": color, "exams": exam_entries})
+                        subjects_clean.append(
+                            {"id": subject_id, "name": name, "color": color, "exams": exam_entries}
+                        )
 
             if errors:
                 for err in errors:
@@ -1281,12 +1283,12 @@ def create_app():
                     subject = existing_subjects_by_id.get(subject_id) if subject_id else None
                     if subject:
                         subject.name = subj["name"]
-                        subject.color = normalize_subject_color(subj.get("color"))
+                        subject.color = subj.get("color")
                     else:
                         subject = Subject(
                             user_id=current_user.id,
                             name=subj["name"],
-                            color=normalize_subject_color(subj.get("color")),
+                            color=subj.get("color"),
                         )
                         db.session.add(subject)
                         db.session.flush()
@@ -1358,7 +1360,7 @@ def create_app():
                     {
                         "id": subject.id,
                         "name": subject.name,
-                        "color": subject.color or "",
+                        "color": subject.color,
                         "exams": [
                             {
                                 "id": exam.id,
@@ -1834,12 +1836,13 @@ def create_app():
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
             new_subject_color = (request.form.get("new_subject_color") or "").strip()
+            normalized_color = normalize_subject_color(new_subject_color)
 
             if subject_choice == "__new__":
                 if not new_subject_name:
                     flash("Escribe el nombre de la nueva asignatura.", "error")
                     return redirect(url_for("add_notes"))
-                if new_subject_color and not HEX_COLOR_RE.match(new_subject_color):
+                if new_subject_color and not normalized_color:
                     flash("Color de asignatura inválido.", "error")
                     return redirect(url_for("add_notes"))
                 subject = Subject.query.filter_by(user_id=current_user.id, name=new_subject_name).first()
@@ -1847,9 +1850,12 @@ def create_app():
                     subject = Subject(
                         user_id=current_user.id,
                         name=new_subject_name,
-                        color=normalize_subject_color(new_subject_color),
+                        color=normalized_color,
                     )
                     db.session.add(subject)
+                    db.session.commit()
+                elif normalized_color and subject.color != normalized_color:
+                    subject.color = normalized_color
                     db.session.commit()
             else:
                 try:
@@ -2316,13 +2322,14 @@ def create_app():
             subject_choice = (request.form.get("subject_choice") or "").strip()
             new_subject_name = (request.form.get("new_subject_name") or "").strip()
             new_subject_color = (request.form.get("new_subject_color") or "").strip()
+            normalized_color = normalize_subject_color(new_subject_color)
 
             if not target_deck:
                 if subject_choice == "__new__":
                     if not new_subject_name:
                         flash("Escribe el nombre de la nueva asignatura.", "error")
                         return redirect(url_for("flashcards_create"))
-                    if new_subject_color and not HEX_COLOR_RE.match(new_subject_color):
+                    if new_subject_color and not normalized_color:
                         flash("Color de asignatura inválido.", "error")
                         return redirect(url_for("flashcards_create"))
                     subject = Subject.query.filter_by(user_id=current_user.id, name=new_subject_name).first()
@@ -2330,9 +2337,12 @@ def create_app():
                         subject = Subject(
                             user_id=current_user.id,
                             name=new_subject_name,
-                            color=normalize_subject_color(new_subject_color),
+                            color=normalized_color,
                         )
                         db.session.add(subject)
+                        db.session.commit()
+                    elif normalized_color and subject.color != normalized_color:
+                        subject.color = normalized_color
                         db.session.commit()
                 else:
                     try:

@@ -47,19 +47,8 @@ details[open]>.details-toggle::after{content:"-"}
 .file-drop__name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file-drop__remove{padding:6px 10px;border-radius:999px;border:1px solid rgba(220,38,38,.4);background:rgba(220,38,38,.12);color:#991b1b;font-weight:700}
 .file-drop__remove:hover{background:rgba(220,38,38,.2)}
-.subject-tint{border-left:6px solid var(--subject-color, #94a3b8);background:linear-gradient(rgba(255,255,255,0.86), rgba(255,255,255,0.86)), var(--subject-color, #94a3b8)}.subject-tint--soft{border-left:4px solid var(--subject-color, #94a3b8);background:linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92)), var(--subject-color, #94a3b8)}
-
-.subject-color-row{display:flex;align-items:center;gap:10px}
-.subject-color-input{width:56px!important;min-width:56px;max-width:56px;height:40px;padding:2px;border-radius:12px;border:1px solid rgba(0,0,0,.18);background:transparent;cursor:pointer}
-.subject-color-input::-webkit-color-swatch-wrapper{padding:0}
-.subject-color-input::-webkit-color-swatch{border:none;border-radius:10px}
-.subject-color-input::-moz-color-swatch{border:none;border-radius:10px}
-.subject-color-swatch{width:28px;height:28px;border-radius:8px;border:1px solid rgba(0,0,0,.18);background:var(--swatch-color,#94a3b8)}
 .subject-tint{border-left:8px solid var(--subject-color,#94a3b8)!important;background:linear-gradient(rgba(255,255,255,.6),rgba(255,255,255,.6)),var(--subject-color,#94a3b8)!important}
 .subject-tint--soft{border-left:4px solid var(--subject-color,#94a3b8)!important;background:linear-gradient(rgba(255,255,255,.75),rgba(255,255,255,.75)),var(--subject-color,#94a3b8)!important}
-
-.subject-color-input{flex:0 0 auto!important}
 .subject-tint .card{border-left:4px solid var(--subject-color,#94a3b8)!important;background:linear-gradient(rgba(255,255,255,.75),rgba(255,255,255,.75)),var(--subject-color,#94a3b8)!important}
 .subject-tint .details-toggle{border-color:var(--subject-color,#94a3b8)!important;background:linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),var(--subject-color,#94a3b8)!important}
-
 .subject-tint .flashcard-option{border-color:var(--subject-color,#94a3b8)!important;background:linear-gradient(rgba(255,255,255,.8),rgba(255,255,255,.8)),var(--subject-color,#94a3b8)!important}
