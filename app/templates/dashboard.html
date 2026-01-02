@@ -28,7 +28,17 @@
         <div style="display:grid; gap:10px; margin-top:12px;">
           {% for item in calendar_items %}
             {% set subject_color = item.subject.color if item.subject else '#94a3b8' %}
-            <div style="padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,.12); border-left:4px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), {{ subject_color }};">
+            {% set has_notes = item.kind == "task" and item.notes %}
+            <div
+              style="padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,.12); border-left:4px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), {{ subject_color }};{% if has_notes %} cursor:pointer;{% endif %}"
+              {% if has_notes %}
+                role="button"
+                tabindex="0"
+                aria-expanded="false"
+                data-calendar-item
+                title="Ver notas"
+              {% endif %}
+            >
               <div style="display:flex; justify-content:space-between; gap:12px;">
                 <div>
                   <strong>{{ "Tarea" if item.kind == "task" else "Examen" }}</strong>
@@ -46,6 +56,9 @@
                   <div class="subtle">{{ item.relative_label }}</div>
                 </div>
               </div>
+              {% if has_notes %}
+                <div class="subtle" style="margin-top:6px;" data-calendar-notes hidden>{{ item.notes }}</div>
+              {% endif %}
             </div>
           {% endfor %}
         </div>
@@ -160,4 +173,34 @@
       </div>
     {% endif %}
   </section>
+
+  <script>
+    (function () {
+      const items = Array.from(document.querySelectorAll("[data-calendar-item]"));
+      if (!items.length) return;
+
+      items.forEach((item) => {
+        const notes = item.querySelector("[data-calendar-notes]");
+        if (!notes) return;
+
+        function toggleNotes() {
+          const expanded = item.getAttribute("aria-expanded") === "true";
+          item.setAttribute("aria-expanded", expanded ? "false" : "true");
+          notes.hidden = expanded;
+        }
+
+        item.addEventListener("click", (event) => {
+          if (event.target.closest("[data-calendar-notes]")) return;
+          toggleNotes();
+        });
+
+        item.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggleNotes();
+          }
+        });
+      });
+    })();
+  </script>
 {% endblock %}
