@@ -65,5 +65,51 @@
         </a>
       </div>
     </div>
+
+    {% if queue_groups %}
+      <div class="card" style="margin-top:16px;">
+        <h2>Apuntes y Tarjetas en cola</h2>
+        <p class="subtle">Estado de las generaciones pendientes o en curso.</p>
+        <div style="display:grid; gap:12px;">
+          {% for group in queue_groups %}
+            <div style="padding:12px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.12); background:rgba(255,255,255,.92);">
+              {% if group.kind == "file_import" %}
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                  <div>
+                    <strong>Archivo:</strong> {{ group.title }}
+                    <div class="subtle">Estado: {{ group.status }}</div>
+                  </div>
+                  <form method="post" action="{{ url_for('cancel_jobs') }}" style="margin:0;">
+                    <input type="hidden" name="group_kind" value="file_import" />
+                    <input type="hidden" name="job_id" value="{{ group.job_id }}" />
+                    <button type="submit" class="btn-primary" onclick="return confirm('¿Cancelar este archivo y su cola asociada?');">Cancelar todo</button>
+                  </form>
+                </div>
+              {% else %}
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                  <div>
+                    <strong>Apunte:</strong> {{ group.title }}
+                    {% if group.deck_titles %}
+                      <div class="subtle">Decks: {{ group.deck_titles|join(', ') }}</div>
+                    {% endif %}
+                    {% if group.summary_total %}
+                      <div class="subtle">Resumen: {{ group.summary_done }}/{{ group.summary_total }} fragmentos</div>
+                    {% endif %}
+                    {% if group.flash_total %}
+                      <div class="subtle">Flashcards: {{ group.flash_done }}/{{ group.flash_total }} fragmentos</div>
+                    {% endif %}
+                  </div>
+                  <form method="post" action="{{ url_for('cancel_jobs') }}" style="margin:0;">
+                    <input type="hidden" name="group_kind" value="note" />
+                    <input type="hidden" name="note_id" value="{{ group.note_id }}" />
+                    <button type="submit" class="btn-primary" onclick="return confirm('¿Cancelar esta generación y borrar resultados parciales?');">Cancelar todo</button>
+                  </form>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
   </section>
 {% endblock %}

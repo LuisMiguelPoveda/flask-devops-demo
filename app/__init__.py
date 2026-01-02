@@ -56,9 +56,9 @@ LLM_PROFILE_CHOICES = [
         "label": "4 GB (conservador)",
         "chunk_tokens": 1500,
         "chunk_overlap": 250,
-        "summary_max_tokens": 1500,
+        "summary_max_tokens": 1200,
         "summary_min_tokens": 120,
-        "summary_ratio": 0.5,
+        "summary_ratio": 0.35,
     },
     {
         "id": "vram_8gb",
@@ -95,6 +95,7 @@ HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _worker_started = False
 _worker_lock_handle = None
 JOB_RETRY_SECONDS = 30
+INCOMPLETE_JOB_STATUSES = ("pending", "running")
 
 
 def chunk_text_with_overlap(
@@ -162,6 +163,153 @@ def resolve_llm_profile(user_id: int | None) -> str:
 def get_llm_limits(user_id: int | None) -> dict:
     profile_key = resolve_llm_profile(user_id)
     return LLM_PROFILE_PRESETS.get(profile_key, DEFAULT_LLM_LIMITS)
+
+
+def payload_int(payload: dict | None, key: str) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get(key)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def has_incomplete_jobs_for_payload(user_id: int, key: str, value: int | None) -> bool:
+    if value is None:
+        return False
+    jobs = Job.query.filter(
+        Job.user_id == user_id,
+        Job.status.in_(INCOMPLETE_JOB_STATUSES),
+    ).all()
+    for job in jobs:
+        if payload_int(job.payload or {}, key) == value:
+            return True
+    return False
+
+
+def job_is_cancelled(job_id: int | None) -> bool:
+    if not job_id:
+        return False
+    status = db.session.query(Job.status).filter_by(id=job_id).scalar()
+    return status == "cancelled"
+
+
+def commit_if_not_cancelled(job_id: int) -> bool:
+    with db.session.no_autoflush:
+        if job_is_cancelled(job_id):
+            db.session.rollback()
+            return False
+    db.session.commit()
+    return True
+
+
+def build_queue_groups(user_id: int) -> list[dict]:
+    jobs = (
+        Job.query.filter(
+            Job.user_id == user_id,
+            Job.type.in_(
+                (
+                    "file_import",
+                    "note_ai",
+                    "note_ai_chunk",
+                    "flashcards_ai_new",
+                    "flashcards_ai_append",
+                    "flashcards_ai_chunk",
+                )
+            ),
+        )
+        .order_by(Job.created_at.asc(), Job.id.asc())
+        .all()
+    )
+    notes = {note.id: note for note in Note.query.filter_by(user_id=user_id).all()}
+    decks = {deck.id: deck for deck in FlashcardDeck.query.filter_by(user_id=user_id).all()}
+
+    note_groups: dict[int, dict] = {}
+    file_groups: list[dict] = []
+
+    for job in jobs:
+        payload = job.payload or {}
+        if job.type == "file_import":
+            if job.status in INCOMPLETE_JOB_STATUSES:
+                file_groups.append(
+                    {
+                        "kind": "file_import",
+                        "job_id": job.id,
+                        "title": payload.get("filename") or "Archivo en cola",
+                        "status": job.status,
+                        "created_at": job.created_at,
+                    }
+                )
+            continue
+
+        note_id = payload_int(payload, "note_id")
+        if not note_id:
+            continue
+        group = note_groups.setdefault(
+            note_id,
+            {
+                "note_id": note_id,
+                "jobs": [],
+                "earliest_incomplete": None,
+            },
+        )
+        group["jobs"].append(job)
+        if job.status in INCOMPLETE_JOB_STATUSES:
+            job_created = job.created_at or datetime.min
+            if not group["earliest_incomplete"] or job_created < group["earliest_incomplete"]:
+                group["earliest_incomplete"] = job_created
+
+    groups: list[dict] = []
+    for note_id, group in note_groups.items():
+        start_at = group.get("earliest_incomplete")
+        if not start_at:
+            continue
+        jobs = [
+            job
+            for job in group["jobs"]
+            if (job.created_at or datetime.min) >= start_at
+        ]
+        if not any(job.status in INCOMPLETE_JOB_STATUSES for job in jobs):
+            continue
+        deck_ids = set()
+        for job in jobs:
+            deck_id = payload_int(job.payload or {}, "deck_id")
+            if deck_id:
+                deck_ids.add(deck_id)
+        summary_jobs = [job for job in jobs if job.type in ("note_ai", "note_ai_chunk")]
+        flash_jobs = [
+            job
+            for job in jobs
+            if job.type in ("flashcards_ai_new", "flashcards_ai_append", "flashcards_ai_chunk")
+        ]
+        summary_done = sum(1 for job in summary_jobs if job.status == "success")
+        flash_done = sum(1 for job in flash_jobs if job.status == "success")
+        deck_titles = [decks[d].title for d in deck_ids if d in decks and decks[d].title]
+        note = notes.get(note_id)
+        created_at = min(
+            (job.created_at for job in jobs if job.created_at),
+            default=start_at,
+        )
+        groups.append(
+            {
+                "kind": "note",
+                "note_id": note_id,
+                "title": note.title if note else f"Apunte #{note_id}",
+                "summary_done": summary_done,
+                "summary_total": len(summary_jobs),
+                "flash_done": flash_done,
+                "flash_total": len(flash_jobs),
+                "deck_titles": deck_titles,
+                "created_at": created_at,
+            }
+        )
+
+    groups.extend(file_groups)
+    groups.sort(key=lambda item: item.get("created_at") or datetime.min, reverse=True)
+    return groups
 
 
 def build_note_chunks_map(
@@ -682,6 +830,10 @@ def process_job(app, job: Job):
                 )
                 if not chunks:
                     return "error", None, "No se pudo dividir el texto para IA."
+                if job_is_cancelled(job.id):
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+                    return "cancelled", None, None
 
                 exam_date_str = exam.exam_date.isoformat() if exam.exam_date else "No indicada"
                 base_name = Path(filename).stem if filename else subject.name
@@ -728,6 +880,7 @@ def process_job(app, job: Job):
                     db.session.add(deck)
                     db.session.flush()
 
+                deck_size_before = len(deck.flashcards or [])
                 for idx, chunk in enumerate(chunks):
                     db.session.add(
                         Job(
@@ -755,6 +908,7 @@ def process_job(app, job: Job):
                                 "user_id": user_id,
                                 "note_id": note.id,
                                 "deck_id": deck.id,
+                                "deck_size_before": deck_size_before,
                                 "model": model,
                                 "count": FLASHCARD_CHUNK_DEFAULT,
                                 "chunk_index": idx,
@@ -763,7 +917,10 @@ def process_job(app, job: Job):
                             },
                         )
                     )
-                db.session.commit()
+                if not commit_if_not_cancelled(job.id):
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+                    return "cancelled", None, None
                 if file_path and os.path.exists(file_path):
                     os.remove(file_path)
                 return "success", f"Archivo procesado: {filename}", None
@@ -809,7 +966,8 @@ def process_job(app, job: Job):
                     ai_used=True,
                 )
                 db.session.add(note)
-                db.session.commit()
+                if not commit_if_not_cancelled(job.id):
+                    return "cancelled", None, None
                 return "success", f"Resumen listo: {title}", None
 
             if job.type == "note_ai_chunk":
@@ -850,7 +1008,8 @@ def process_job(app, job: Job):
                 separator = "\n\n" if existing else ""
                 note.content = f"{existing}{separator}{summary.strip()}"
                 note.ai_used = True
-                db.session.commit()
+                if not commit_if_not_cancelled(job.id):
+                    return "cancelled", None, None
 
                 is_last = total_chunks and (chunk_index + 1) == total_chunks
                 progress = f" ({chunk_index + 1}/{total_chunks})" if total_chunks > 1 else ""
@@ -879,7 +1038,8 @@ def process_job(app, job: Job):
                     if not deck:
                         return "error", None, "Deck inválido."
                     deck.flashcards = (deck.flashcards or []) + cards
-                    db.session.commit()
+                    if not commit_if_not_cancelled(job.id):
+                        return "cancelled", None, None
                     return "success", f"{len(cards)} flashcards añadidas a {deck.title}", None
 
                 # new deck
@@ -892,7 +1052,8 @@ def process_job(app, job: Job):
                     flashcards=cards,
                 )
                 db.session.add(deck)
-                db.session.commit()
+                if not commit_if_not_cancelled(job.id):
+                    return "cancelled", None, None
                 return "success", f"Deck creado: {deck.title}", None
 
             if job.type == "flashcards_ai_chunk":
@@ -913,7 +1074,8 @@ def process_job(app, job: Job):
 
                 cards = lmstudio_generate_flashcards(app, model, note, count=count, source_text=chunk_text)
                 deck.flashcards = (deck.flashcards or []) + cards
-                db.session.commit()
+                if not commit_if_not_cancelled(job.id):
+                    return "cancelled", None, None
 
                 msg = f"Flashcards añadidas (fragmento {chunk_index + 1}/{total_chunks}) a {deck.title}"
                 if (chunk_index + 1) == total_chunks:
@@ -1133,6 +1295,11 @@ def create_app():
                                 db.session.commit()
 
                                 status, msg, err = process_job(app, job)
+                                db.session.refresh(job)
+                                if job.status == "cancelled":
+                                    retry_job_id = None
+                                    retry_at = None
+                                    continue
                                 if status == "error":
                                     job.status = "pending"
                                     job.result_message = None
@@ -1707,7 +1874,136 @@ def create_app():
     def dashboard():
         profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
         student_name = profile.student_name if profile else current_user.username
-        return render_template("dashboard.html", student_name=student_name)
+        queue_groups = build_queue_groups(current_user.id)
+        return render_template(
+            "dashboard.html",
+            student_name=student_name,
+            queue_groups=queue_groups,
+        )
+
+    @app.route("/jobs/cancel", methods=["POST"])
+    @login_required
+    def cancel_jobs():
+        group_kind = (request.form.get("group_kind") or "").strip()
+        if group_kind == "note":
+            note_id = request.form.get("note_id", type=int)
+            if not note_id:
+                flash("Apunte inválido para cancelar.", "error")
+                return redirect(url_for("dashboard"))
+
+            jobs = (
+                Job.query.filter(
+                    Job.user_id == current_user.id,
+                    Job.type.in_(
+                        (
+                            "note_ai",
+                            "note_ai_chunk",
+                            "flashcards_ai_new",
+                            "flashcards_ai_append",
+                            "flashcards_ai_chunk",
+                        )
+                    ),
+                )
+                .order_by(Job.created_at.asc(), Job.id.asc())
+                .all()
+            )
+            related_jobs = [job for job in jobs if payload_int(job.payload or {}, "note_id") == note_id]
+            if not related_jobs:
+                flash("No se encontraron trabajos para ese apunte.", "error")
+                return redirect(url_for("dashboard"))
+
+            incomplete_jobs = [job for job in related_jobs if job.status in INCOMPLETE_JOB_STATUSES]
+            if not incomplete_jobs:
+                flash("No hay trabajos en curso para ese apunte.", "error")
+                return redirect(url_for("dashboard"))
+            start_at = min((job.created_at or datetime.min) for job in incomplete_jobs)
+            related_jobs = [
+                job
+                for job in related_jobs
+                if (job.created_at or datetime.min) >= start_at
+            ]
+            deck_ids = {
+                payload_int(job.payload or {}, "deck_id")
+                for job in related_jobs
+                if payload_int(job.payload or {}, "deck_id") is not None
+            }
+
+            for job in related_jobs:
+                if job.status in INCOMPLETE_JOB_STATUSES:
+                    job.status = "cancelled"
+                    job.result_message = None
+                    job.error_message = "Cancelado por el usuario."
+                    job.updated_at = datetime.utcnow()
+
+            has_note_generation = any(
+                job.type in ("note_ai", "note_ai_chunk") for job in related_jobs
+            )
+
+            decks_to_check = []
+            if deck_ids:
+                decks_to_check = (
+                    FlashcardDeck.query.filter(
+                        FlashcardDeck.user_id == current_user.id,
+                        FlashcardDeck.id.in_(deck_ids),
+                    )
+                    .all()
+                )
+
+            for deck in decks_to_check:
+                if has_note_generation and deck.source_note_id == note_id:
+                    db.session.delete(deck)
+                    continue
+                deck_jobs = [
+                    job
+                    for job in related_jobs
+                    if payload_int(job.payload or {}, "deck_id") == deck.id
+                ]
+                sizes = [
+                    payload_int(job.payload or {}, "deck_size_before")
+                    for job in deck_jobs
+                    if payload_int(job.payload or {}, "deck_size_before") is not None
+                ]
+                if sizes:
+                    keep_size = min(sizes)
+                    deck.flashcards = (deck.flashcards or [])[:keep_size]
+
+            if has_note_generation:
+                note = Note.query.filter_by(id=note_id, user_id=current_user.id).first()
+                if note:
+                    NoteSourceFile.query.filter_by(note_id=note.id).delete()
+                    db.session.delete(note)
+
+            db.session.commit()
+            flash("Generación cancelada ✅ Se han eliminado resultados parciales.", "success")
+            return redirect(url_for("dashboard"))
+
+        if group_kind == "file_import":
+            job_id = request.form.get("job_id", type=int)
+            if not job_id:
+                flash("Trabajo inválido para cancelar.", "error")
+                return redirect(url_for("dashboard"))
+            job = Job.query.filter_by(id=job_id, user_id=current_user.id, type="file_import").first()
+            if not job:
+                flash("Trabajo no encontrado.", "error")
+                return redirect(url_for("dashboard"))
+            if job.status in INCOMPLETE_JOB_STATUSES:
+                job.status = "cancelled"
+                job.result_message = None
+                job.error_message = "Cancelado por el usuario."
+                job.updated_at = datetime.utcnow()
+            payload = job.payload or {}
+            file_path = payload.get("file_path") if isinstance(payload, dict) else None
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            db.session.commit()
+            flash("Trabajo cancelado ✅", "success")
+            return redirect(url_for("dashboard"))
+
+        flash("No se pudo cancelar la cola solicitada.", "error")
+        return redirect(url_for("dashboard"))
 
     @app.route("/options")
     @login_required
@@ -2256,6 +2552,7 @@ def create_app():
                     db.session.add(deck)
                     db.session.flush()
 
+            deck_size_before = len(deck.flashcards or []) if deck else 0
             for idx, chunk in enumerate(chunks):
                 job = Job(
                     user_id=current_user.id,
@@ -2283,6 +2580,7 @@ def create_app():
                                 "user_id": current_user.id,
                                 "note_id": note.id,
                                 "deck_id": deck.id,
+                                "deck_size_before": deck_size_before,
                                 "model": selected_model,
                                 "count": FLASHCARD_CHUNK_DEFAULT,
                                 "chunk_index": idx,
@@ -2498,6 +2796,9 @@ def create_app():
     @login_required
     def note_delete(note_id: int):
         note = Note.query.filter_by(id=note_id, user_id=current_user.id).first_or_404()
+        if has_incomplete_jobs_for_payload(current_user.id, "note_id", note.id):
+            flash("No puedes borrar este apunte mientras haya trabajos en curso.", "error")
+            return redirect(url_for("notes_list"))
         NoteSourceFile.query.filter_by(note_id=note.id).delete()
         db.session.delete(note)
         db.session.commit()
@@ -2577,6 +2878,7 @@ def create_app():
                     db.session.add(deck)
                     db.session.commit()
 
+                deck_size_before = len(deck.flashcards or [])
                 for idx, chunk in enumerate(chunks):
                     job = Job(
                         user_id=current_user.id,
@@ -2585,6 +2887,7 @@ def create_app():
                             "user_id": current_user.id,
                             "note_id": note.id,
                             "deck_id": deck.id,
+                            "deck_size_before": deck_size_before,
                             "model": selected_model,
                             "count": count_per_chunk,
                             "chunk_index": idx,
@@ -2811,6 +3114,7 @@ def create_app():
                 chunks = chunk_entry.get("chunks") or [note.content or ""]
                 chunk_count = len(chunks)
 
+                deck_size_before = len(deck.flashcards or [])
                 for idx, chunk in enumerate(chunks):
                     job = Job(
                         user_id=current_user.id,
@@ -2819,6 +3123,7 @@ def create_app():
                             "user_id": current_user.id,
                             "note_id": note.id,
                             "deck_id": deck.id,
+                            "deck_size_before": deck_size_before,
                             "model": model,
                             "count": count_per_chunk,
                             "chunk_index": idx,
@@ -2927,6 +3232,9 @@ def create_app():
     @login_required
     def flashcards_delete(deck_id: int):
         deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=current_user.id).first_or_404()
+        if has_incomplete_jobs_for_payload(current_user.id, "deck_id", deck.id):
+            flash("No puedes borrar este deck mientras haya trabajos en curso.", "error")
+            return redirect(url_for("flashcards_list"))
         db.session.delete(deck)
         db.session.commit()
         flash("Deck de flashcards borrado ✅", "success")
