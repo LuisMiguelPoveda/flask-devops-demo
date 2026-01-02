@@ -44,6 +44,7 @@ from .models import (
     StudentProfile,
     SubjectExam,
     NoteSourceFile,
+    TaskItem,
 )
 
 
@@ -89,6 +90,15 @@ DEFAULT_CHUNK_TOKENS = DEFAULT_LLM_LIMITS["chunk_tokens"]
 DEFAULT_CHUNK_OVERLAP = DEFAULT_LLM_LIMITS["chunk_overlap"]
 FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
 FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
+TASK_WINDOW_OPTIONS = [
+    {"value": 0, "label": "Todos"},
+    {"value": 7, "label": "1 semana"},
+    {"value": 14, "label": "2 semanas"},
+    {"value": 30, "label": "1 mes"},
+]
+TASK_WINDOW_VALUES = {opt["value"] for opt in TASK_WINDOW_OPTIONS}
+TASK_WINDOW_LABELS = {opt["value"]: opt["label"] for opt in TASK_WINDOW_OPTIONS}
+TASK_WINDOW_DEFAULT = 14
 LLM_OFFLINE_LABEL = "Motor LLM no encontrado"
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # evita arrancar dos workers en procesos reloader
@@ -163,6 +173,74 @@ def resolve_llm_profile(user_id: int | None) -> str:
 def get_llm_limits(user_id: int | None) -> dict:
     profile_key = resolve_llm_profile(user_id)
     return LLM_PROFILE_PRESETS.get(profile_key, DEFAULT_LLM_LIMITS)
+
+
+def resolve_task_window_days(profile: StudentProfile | None) -> int:
+    if profile and profile.task_window_days in TASK_WINDOW_VALUES:
+        return profile.task_window_days
+    return TASK_WINDOW_DEFAULT
+
+
+def calendar_window_range(profile: StudentProfile | None):
+    window_days = resolve_task_window_days(profile)
+    today = datetime.utcnow().date()
+    if window_days == 0:
+        return window_days, None, None
+    end_date = today + timedelta(days=max(1, window_days) - 1)
+    return window_days, today, end_date
+
+
+def build_calendar_items(user_id: int, start_date, end_date, today=None) -> list[dict]:
+    if today is None:
+        today = datetime.utcnow().date()
+    tasks_query = TaskItem.query.filter_by(user_id=user_id)
+    exams_query = SubjectExam.query.join(Subject, SubjectExam.subject_id == Subject.id).filter(
+        Subject.user_id == user_id
+    )
+    if start_date is not None and end_date is not None:
+        tasks_query = tasks_query.filter(TaskItem.due_date >= start_date, TaskItem.due_date <= end_date)
+        exams_query = exams_query.filter(SubjectExam.exam_date >= start_date, SubjectExam.exam_date <= end_date)
+    tasks = tasks_query.order_by(TaskItem.due_date.asc(), TaskItem.title.asc()).all()
+    exams = exams_query.order_by(SubjectExam.exam_date.asc(), SubjectExam.tema.asc()).all()
+
+    def relative_label(target_date):
+        delta_days = (target_date - today).days
+        if delta_days < 0:
+            days = abs(delta_days)
+            return "Hace 1 día" if days == 1 else f"Hace {days} días"
+        if delta_days == 0:
+            return "Hoy"
+        if delta_days == 1:
+            return "Mañana"
+        return f"En {delta_days} días"
+
+    items: list[dict] = []
+    for task in tasks:
+        items.append(
+            {
+                "kind": "task",
+                "date": task.due_date,
+                "title": task.title,
+                "notes": task.notes,
+                "subject": task.subject,
+                "task": task,
+                "relative_label": relative_label(task.due_date),
+            }
+        )
+    for exam in exams:
+        items.append(
+            {
+                "kind": "exam",
+                "date": exam.exam_date,
+                "title": exam.tema,
+                "subject": exam.subject,
+                "exam": exam,
+                "relative_label": relative_label(exam.exam_date),
+            }
+        )
+
+    items.sort(key=lambda item: (item["date"], item["kind"], (item["title"] or "").lower()))
+    return items
 
 
 def payload_int(payload: dict | None, key: str) -> int | None:
@@ -1233,8 +1311,14 @@ def create_app():
                 return
             rows = db.session.execute(text("PRAGMA table_info(student_profiles)")).all()
             columns = {row[1] for row in rows}
+            alter_statements = []
             if "llm_profile" not in columns:
-                db.session.execute(text("ALTER TABLE student_profiles ADD COLUMN llm_profile VARCHAR(20)"))
+                alter_statements.append("ALTER TABLE student_profiles ADD COLUMN llm_profile VARCHAR(20)")
+            if "task_window_days" not in columns:
+                alter_statements.append("ALTER TABLE student_profiles ADD COLUMN task_window_days INTEGER")
+            for statement in alter_statements:
+                db.session.execute(text(statement))
+            if alter_statements:
                 db.session.commit()
         except Exception:
             db.session.rollback()
@@ -1465,6 +1549,7 @@ def create_app():
                         age=age_val or 0,
                         personality_notes=personality_notes,
                         llm_profile=llm_profile,
+                        task_window_days=TASK_WINDOW_DEFAULT,
                     )
                     db.session.add(profile)
 
@@ -1844,7 +1929,7 @@ def create_app():
 
             for err in errors:
                 flash(err, "error")
-            return redirect(url_for("setup_next"))
+            return redirect(url_for("dashboard"))
 
         return render_template(
             "setup_generate.html",
@@ -1859,8 +1944,7 @@ def create_app():
     def setup_next():
         if not is_setup_complete(current_user.id):
             return redirect(url_for("setup"))
-        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
-        return render_template("setup_next.html", student_name=profile.student_name if profile else current_user.username)
+        return redirect(url_for("dashboard"))
 
     @app.route("/logout")
     @login_required
@@ -1874,12 +1958,254 @@ def create_app():
     def dashboard():
         profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
         student_name = profile.student_name if profile else current_user.username
+        window_days, window_start, window_end = calendar_window_range(profile)
+        calendar_items = build_calendar_items(current_user.id, window_start, window_end, window_start)
+        calendar_label = TASK_WINDOW_LABELS.get(window_days, f"{window_days} días")
         queue_groups = build_queue_groups(current_user.id)
         return render_template(
             "dashboard.html",
             student_name=student_name,
             queue_groups=queue_groups,
+            calendar_items=calendar_items,
+            calendar_window_label=calendar_label,
+            calendar_window_start=window_start,
+            calendar_window_end=window_end,
         )
+
+    @app.route("/calendar")
+    @login_required
+    def task_calendar():
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        student_name = profile.student_name if profile else current_user.username
+        window_days, window_start, window_end = calendar_window_range(profile)
+        calendar_items = build_calendar_items(current_user.id, window_start, window_end, window_start)
+        window_label = TASK_WINDOW_LABELS.get(window_days, f"{window_days} días")
+        subjects = Subject.query.filter_by(user_id=current_user.id).order_by(Subject.name.asc()).all()
+        return render_template(
+            "calendar.html",
+            student_name=student_name,
+            window_options=TASK_WINDOW_OPTIONS,
+            window_days=window_days,
+            window_label=window_label,
+            window_start=window_start,
+            window_end=window_end,
+            calendar_items=calendar_items,
+            subjects=subjects,
+        )
+
+    @app.route("/calendar/window", methods=["POST"])
+    @login_required
+    def task_calendar_window_update():
+        window_days = request.form.get("window_days", type=int)
+        if window_days not in TASK_WINDOW_VALUES:
+            flash("Selecciona un periodo válido.", "error")
+            return redirect(url_for("task_calendar"))
+
+        profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+        if not profile:
+            flash("Completa el perfil antes de configurar el calendario.", "error")
+            return redirect(url_for("setup"))
+
+        try:
+            profile.task_window_days = window_days
+            db.session.commit()
+            flash("Periodo actualizado ✅", "success")
+        except Exception:
+            db.session.rollback()
+            flash("No se pudo actualizar el periodo.", "error")
+        return redirect(url_for("task_calendar"))
+
+    @app.route("/calendar/tasks", methods=["POST"])
+    @login_required
+    def calendar_task_create():
+        title = (request.form.get("title") or "").strip()
+        due_date_str = (request.form.get("due_date") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        subject_id = request.form.get("subject_id", type=int)
+        errors: list[str] = []
+
+        if not title:
+            errors.append("Añade un título para la tarea.")
+
+        due_date = None
+        if not due_date_str:
+            errors.append("Selecciona una fecha límite.")
+        else:
+            try:
+                due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                errors.append("Formato de fecha inválido.")
+
+        subject = None
+        if subject_id:
+            subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+            if not subject:
+                errors.append("Asignatura inválida.")
+
+        if errors:
+            for err in errors:
+                flash(err, "error")
+            return redirect(url_for("task_calendar"))
+
+        try:
+            task = TaskItem(
+                user_id=current_user.id,
+                subject_id=subject.id if subject else None,
+                title=title,
+                due_date=due_date,
+                notes=notes or None,
+            )
+            db.session.add(task)
+            db.session.commit()
+            flash("Tarea añadida ✅", "success")
+        except Exception:
+            db.session.rollback()
+            flash("No se pudo guardar la tarea.", "error")
+        return redirect(url_for("task_calendar"))
+
+    @app.route("/calendar/exams", methods=["POST"])
+    @login_required
+    def calendar_exam_create():
+        subject_id = request.form.get("subject_id", type=int)
+        exam_date_str = (request.form.get("exam_date") or "").strip()
+        tema = (request.form.get("tema") or "").strip()
+        new_subject_name = (request.form.get("new_subject") or "").strip()
+        new_subject_color_raw = (request.form.get("new_subject_color") or "").strip()
+        errors: list[str] = []
+
+        subject = None
+        if new_subject_name:
+            existing_subject = Subject.query.filter_by(
+                user_id=current_user.id,
+                name=new_subject_name,
+            ).first()
+            if existing_subject:
+                subject = existing_subject
+            else:
+                if len(new_subject_name) > 120:
+                    errors.append("El nombre de la asignatura es demasiado largo.")
+                color_value = None
+                if new_subject_color_raw:
+                    color_value = normalize_subject_color(new_subject_color_raw)
+                    if not color_value:
+                        errors.append("Color de asignatura inválido.")
+                if not errors:
+                    subject = Subject(
+                        user_id=current_user.id,
+                        name=new_subject_name,
+                        color=color_value,
+                    )
+                    db.session.add(subject)
+                    db.session.flush()
+        else:
+            if not subject_id:
+                errors.append("Selecciona una asignatura.")
+            else:
+                subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+                if not subject:
+                    errors.append("Asignatura inválida.")
+
+        exam_date = None
+        if not exam_date_str:
+            errors.append("Selecciona una fecha de examen.")
+        else:
+            try:
+                exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                errors.append("Formato de fecha inválido.")
+
+        if not tema:
+            errors.append("Indica el tema del examen.")
+
+        if errors:
+            db.session.rollback()
+            for err in errors:
+                flash(err, "error")
+            return redirect(url_for("task_calendar"))
+
+        try:
+            existing = SubjectExam.query.filter_by(
+                subject_id=subject.id,
+                exam_date=exam_date,
+                tema=tema,
+            ).first()
+            if existing:
+                flash("Ese examen ya existe.", "error")
+                return redirect(url_for("task_calendar"))
+
+            new_exam = SubjectExam(subject_id=subject.id, exam_date=exam_date, tema=tema)
+            db.session.add(new_exam)
+            db.session.commit()
+            flash("Examen añadido ✅", "success")
+        except Exception:
+            db.session.rollback()
+            flash("No se pudo añadir el examen.", "error")
+        return redirect(url_for("task_calendar"))
+
+    @app.route("/calendar/tasks/<int:task_id>/update", methods=["POST"])
+    @login_required
+    def calendar_task_update(task_id: int):
+        task = TaskItem.query.filter_by(id=task_id, user_id=current_user.id).first()
+        if not task:
+            flash("Tarea no encontrada.", "error")
+            return redirect(url_for("task_calendar"))
+
+        title = (request.form.get("title") or "").strip()
+        due_date_str = (request.form.get("due_date") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        subject_id = request.form.get("subject_id", type=int)
+        errors: list[str] = []
+
+        if not title:
+            errors.append("El título no puede estar vacío.")
+
+        due_date = None
+        if not due_date_str:
+            errors.append("Selecciona una fecha límite.")
+        else:
+            try:
+                due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                errors.append("Formato de fecha inválido.")
+
+        subject = None
+        if subject_id:
+            subject = Subject.query.filter_by(id=subject_id, user_id=current_user.id).first()
+            if not subject:
+                errors.append("Asignatura inválida.")
+
+        if errors:
+            for err in errors:
+                flash(err, "error")
+            return redirect(url_for("task_calendar"))
+
+        try:
+            task.title = title
+            task.due_date = due_date
+            task.notes = notes or None
+            task.subject_id = subject.id if subject else None
+            db.session.commit()
+            flash("Tarea actualizada ✅", "success")
+        except Exception:
+            db.session.rollback()
+            flash("No se pudo actualizar la tarea.", "error")
+        return redirect(url_for("task_calendar"))
+
+    @app.route("/calendar/tasks/<int:task_id>/delete", methods=["POST"])
+    @login_required
+    def calendar_task_delete(task_id: int):
+        task = TaskItem.query.filter_by(id=task_id, user_id=current_user.id).first()
+        if not task:
+            flash("Tarea no encontrada.", "error")
+            return redirect(url_for("task_calendar"))
+        try:
+            db.session.delete(task)
+            db.session.commit()
+            flash("Tarea eliminada ✅", "success")
+        except Exception:
+            db.session.rollback()
+            flash("No se pudo eliminar la tarea.", "error")
+        return redirect(url_for("task_calendar"))
 
     @app.route("/jobs/cancel", methods=["POST"])
     @login_required
@@ -2094,6 +2420,7 @@ def create_app():
             AskProfeMessage.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
             Job.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
             FlashcardDeck.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
+            TaskItem.query.filter_by(user_id=current_user.id).delete(synchronize_session=False)
 
             if note_ids:
                 NoteSourceFile.query.filter(NoteSourceFile.note_id.in_(note_ids)).delete(synchronize_session=False)

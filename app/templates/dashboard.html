@@ -12,6 +12,48 @@
       <a class="link-pill" href="{{ url_for('logout') }}">Cerrar sesión</a>
     </header>
 
+    <div class="card" style="margin-top:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <div>
+          <h2 style="margin:0;">Próximas tareas y exámenes</h2>
+          {% if calendar_window_start and calendar_window_end %}
+            <p class="subtle" style="margin:4px 0 0;">Periodo: {{ calendar_window_label }} ({{ calendar_window_start }} a {{ calendar_window_end }})</p>
+          {% else %}
+            <p class="subtle" style="margin:4px 0 0;">Periodo: {{ calendar_window_label }}</p>
+          {% endif %}
+        </div>
+        <a class="link-pill" href="{{ url_for('task_calendar') }}">Abrir calendario</a>
+      </div>
+      {% if calendar_items %}
+        <div style="display:grid; gap:10px; margin-top:12px;">
+          {% for item in calendar_items %}
+            {% set subject_color = item.subject.color if item.subject else '#94a3b8' %}
+            <div style="padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,.12); border-left:4px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), {{ subject_color }};">
+              <div style="display:flex; justify-content:space-between; gap:12px;">
+                <div>
+                  <strong>{{ "Tarea" if item.kind == "task" else "Examen" }}</strong>
+                  <div style="font-weight:700; margin-top:4px;">{{ item.title }}</div>
+                  <div class="subtle">
+                    {% if item.subject %}
+                      {{ item.subject.name }}
+                    {% else %}
+                      Sin asignatura
+                    {% endif %}
+                  </div>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-weight:700;">{{ item.date }}</div>
+                  <div class="subtle">{{ item.relative_label }}</div>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p style="margin-top:12px;">No hay tareas ni exámenes en este periodo.</p>
+      {% endif %}
+    </div>
+
     <div class="menu-wrap">
       <div class="menu-grid" data-nav>
         {% if profe_busy %}
@@ -50,6 +92,12 @@
           <div class="menu-icon">🗂️</div>
           <div class="menu-title">Visualizar / Editar flashcards</div>
           <div class="menu-desc">Filtra, edita y borra decks.</div>
+        </a>
+
+        <a class="menu-btn nav-option" href="{{ url_for('task_calendar') }}">
+          <div class="menu-icon">🗓️</div>
+          <div class="menu-title">Calendario de Tareas</div>
+          <div class="menu-desc">Revisa próximas tareas y exámenes.</div>
         </a>
 
         <a class="menu-btn nav-option" href="{{ url_for('options') }}">

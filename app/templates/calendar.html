@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Calendario de Tareas{% endblock %}
+
+{% block content %}
+  <section class="shell shell--dashboard">
+    <header class="dash-hero">
+      <div>
+        <p class="eyebrow">Calendario</p>
+        <h1 class="headline" style="color:#fff;">Calendario de Tareas</h1>
+        <p class="subtle">Gestiona tareas y revisa los próximos exámenes.</p>
+      </div>
+      <a class="link-pill" href="{{ url_for('dashboard') }}">Volver al menú</a>
+    </header>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h2 style="margin-top:0;">Periodo visible</h2>
+      <form method="post" action="{{ url_for('task_calendar_window_update') }}">
+        <div>
+          <label for="window_days">Mostrar próximos</label>
+          <select id="window_days" name="window_days" required>
+            {% for opt in window_options %}
+              <option value="{{ opt.value }}" {% if opt.value == window_days %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% if window_start and window_end %}
+          <p class="subtle">Actual: {{ window_label }} ({{ window_start }} a {{ window_end }})</p>
+        {% else %}
+          <p class="subtle">Actual: {{ window_label }}</p>
+        {% endif %}
+        <button type="submit" class="btn-primary">Guardar periodo</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h2 style="margin-top:0;">Añadir tarea</h2>
+      <form method="post" action="{{ url_for('calendar_task_create') }}">
+        <div>
+          <label for="task_title">Título</label>
+          <input id="task_title" name="title" type="text" maxlength="200" required />
+        </div>
+        <div>
+          <label for="task_due_date">Fecha límite</label>
+          <input id="task_due_date" name="due_date" type="date" required />
+        </div>
+        <div>
+          <label for="task_subject">Asignatura (opcional)</label>
+          <select id="task_subject" name="subject_id">
+            <option value="">(sin asignatura)</option>
+            {% for s in subjects %}
+              <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="task_notes">Notas (opcional)</label>
+          <textarea id="task_notes" name="notes" rows="3" placeholder="Ej: leer capítulo 4"></textarea>
+        </div>
+        <button type="submit" class="btn-primary">Añadir tarea</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h2 style="margin-top:0;">Añadir examen</h2>
+      <form method="post" action="{{ url_for('calendar_exam_create') }}">
+        <div>
+          <label for="exam_subject">Asignatura</label>
+          <select id="exam_subject" name="subject_id">
+            <option value="">(elige asignatura)</option>
+            {% for s in subjects %}
+              <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="exam_subject_new">O nueva asignatura</label>
+          <input id="exam_subject_new" name="new_subject" type="text" maxlength="120" placeholder="Ej: Física" />
+        </div>
+        <div>
+          <label for="exam_subject_color">Color de la nueva asignatura (opcional)</label>
+          <input id="exam_subject_color" name="new_subject_color" type="color" value="#94a3b8" />
+        </div>
+        <p class="subtle">Elige una asignatura existente o escribe una nueva.</p>
+        <div>
+          <label for="exam_date">Fecha de examen</label>
+          <input id="exam_date" name="exam_date" type="date" required />
+        </div>
+        <div>
+          <label for="exam_tema">Tema</label>
+          <input id="exam_tema" name="tema" type="text" maxlength="200" placeholder="Ej: Álgebra lineal" required />
+        </div>
+        <p class="subtle">Si la fecha queda fuera del periodo visible, aparecerá cuando elijas un rango más amplio.</p>
+        <button type="submit" class="btn-primary">Añadir examen</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <div>
+          <h2 style="margin:0;">Próximos eventos</h2>
+          {% if window_start and window_end %}
+            <p class="subtle" style="margin:4px 0 0;">Ordenados por fecha: {{ window_label }} ({{ window_start }} a {{ window_end }})</p>
+          {% else %}
+            <p class="subtle" style="margin:4px 0 0;">Ordenados por fecha: {{ window_label }}</p>
+          {% endif %}
+          {% if window_start and window_end %}
+            <p class="subtle" style="margin:4px 0 0;">Solo se muestran tareas y exámenes dentro del periodo visible.</p>
+          {% else %}
+            <p class="subtle" style="margin:4px 0 0;">Se muestran todas las tareas y exámenes.</p>
+          {% endif %}
+        </div>
+        <a class="link-pill" href="{{ url_for('setup_subjects') }}">Editar exámenes</a>
+      </div>
+
+      {% if calendar_items|length == 0 %}
+        <p style="margin-top:12px;">No hay tareas ni exámenes en este periodo.</p>
+      {% else %}
+        <div style="display:grid; gap:12px; margin-top:12px;">
+          {% for item in calendar_items %}
+            {% set subject_color = item.subject.color if item.subject else '#94a3b8' %}
+            <div style="padding:12px 14px; border-radius:14px; border:1px solid rgba(0,0,0,.12); border-left:4px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.75), rgba(255,255,255,.75)), {{ subject_color }};">
+              <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+                <div>
+                  <strong>{{ "Tarea" if item.kind == "task" else "Examen" }}</strong>
+                  <div style="font-size:16px; font-weight:700; margin-top:4px;">{{ item.title }}</div>
+                  <div class="subtle">
+                    {% if item.subject %}
+                      {{ item.subject.name }}
+                    {% else %}
+                      Sin asignatura
+                    {% endif %}
+                  </div>
+                  {% if item.notes %}
+                    <div class="subtle" style="margin-top:4px;">{{ item.notes }}</div>
+                  {% endif %}
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-weight:700;">{{ item.date }}</div>
+                  <div class="subtle">{{ item.relative_label }}</div>
+                </div>
+              </div>
+
+              {% if item.kind == "task" %}
+                <div class="details-row" style="margin-top:10px;">
+                  <details>
+                    <summary class="details-toggle">Editar tarea</summary>
+                    <form method="post" action="{{ url_for('calendar_task_update', task_id=item.task.id) }}" style="margin-top:10px;">
+                      <div>
+                        <label for="task_title_{{ item.task.id }}">Título</label>
+                        <input id="task_title_{{ item.task.id }}" name="title" type="text" maxlength="200" value="{{ item.task.title }}" required />
+                      </div>
+                      <div>
+                        <label for="task_due_{{ item.task.id }}">Fecha límite</label>
+                        <input id="task_due_{{ item.task.id }}" name="due_date" type="date" value="{{ item.task.due_date }}" required />
+                      </div>
+                      <div>
+                        <label for="task_subject_{{ item.task.id }}">Asignatura (opcional)</label>
+                        <select id="task_subject_{{ item.task.id }}" name="subject_id">
+                          <option value="">(sin asignatura)</option>
+                          {% for s in subjects %}
+                            <option value="{{ s.id }}" {% if item.task.subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div>
+                        <label for="task_notes_{{ item.task.id }}">Notas (opcional)</label>
+                        <textarea id="task_notes_{{ item.task.id }}" name="notes" rows="3">{{ item.task.notes or '' }}</textarea>
+                      </div>
+                      <button type="submit" class="btn-primary">Guardar cambios</button>
+                    </form>
+                  </details>
+
+                  <form method="post" action="{{ url_for('calendar_task_delete', task_id=item.task.id) }}" class="details-row__action">
+                    <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Borrar esta tarea?');">Borrar</button>
+                  </form>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}

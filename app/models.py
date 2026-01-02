@@ -17,6 +17,7 @@ class User(db.Model, UserMixin):
     flashcard_decks = db.relationship("FlashcardDeck", back_populates="user", cascade="all, delete-orphan")
     ask_profe_messages = db.relationship("AskProfeMessage", back_populates="user", cascade="all, delete-orphan")
     profile = db.relationship("StudentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    tasks = db.relationship("TaskItem", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subject(db.Model):
@@ -31,6 +32,7 @@ class Subject(db.Model):
     notes = db.relationship("Note", back_populates="subject", cascade="all, delete-orphan")
     flashcard_decks = db.relationship("FlashcardDeck", back_populates="subject", cascade="all, delete-orphan")
     exams = db.relationship("SubjectExam", back_populates="subject", cascade="all, delete-orphan")
+    tasks = db.relationship("TaskItem", back_populates="subject", cascade="all, delete-orphan")
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "name", name="uq_subject_user_name"),
@@ -164,6 +166,7 @@ class StudentProfile(db.Model):
     personality_notes = db.Column(db.Text, nullable=False)
     llm_profile = db.Column(db.String(20), nullable=True)
     default_model = db.Column(db.String(120), nullable=True)
+    task_window_days = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -184,4 +187,24 @@ class SubjectExam(db.Model):
     __table_args__ = (
         db.Index("ix_subject_exams_subject_date", "subject_id", "exam_date"),
         db.UniqueConstraint("subject_id", "exam_date", "tema", name="uq_subject_exam"),
+    )
+
+
+class TaskItem(db.Model):
+    __tablename__ = "tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey("subjects.id"), nullable=True, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship("User", back_populates="tasks")
+    subject = db.relationship("Subject", back_populates="tasks")
+
+    __table_args__ = (
+        db.Index("ix_tasks_user_due", "user_id", "due_date"),
     )
