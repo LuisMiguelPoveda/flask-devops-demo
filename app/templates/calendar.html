@@ -33,65 +33,69 @@
     </div>
 
     <div class="card" style="margin-bottom:14px;">
-      <h2 style="margin-top:0;">Añadir tarea</h2>
-      <form method="post" action="{{ url_for('calendar_task_create') }}">
-        <div>
-          <label for="task_title">Título</label>
-          <input id="task_title" name="title" type="text" maxlength="200" required />
-        </div>
-        <div>
-          <label for="task_due_date">Fecha límite</label>
-          <input id="task_due_date" name="due_date" type="date" required />
-        </div>
-        <div>
-          <label for="task_subject">Asignatura (opcional)</label>
-          <select id="task_subject" name="subject_id">
-            <option value="">(sin asignatura)</option>
-            {% for s in subjects %}
-              <option value="{{ s.id }}">{{ s.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="task_notes">Notas (opcional)</label>
-          <textarea id="task_notes" name="notes" rows="3" placeholder="Ej: leer capítulo 4"></textarea>
-        </div>
-        <button type="submit" class="btn-primary">Añadir tarea</button>
-      </form>
+      <details>
+        <summary class="details-toggle">Añadir tarea</summary>
+        <form method="post" action="{{ url_for('calendar_task_create') }}" style="margin-top:10px;">
+          <div>
+            <label for="task_title">Título</label>
+            <input id="task_title" name="title" type="text" maxlength="200" required />
+          </div>
+          <div>
+            <label for="task_due_date">Fecha límite</label>
+            <input id="task_due_date" name="due_date" type="date" required />
+          </div>
+          <div>
+            <label for="task_subject">Asignatura (opcional)</label>
+            <select id="task_subject" name="subject_id">
+              <option value="">(sin asignatura)</option>
+              {% for s in subjects %}
+                <option value="{{ s.id }}">{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="task_notes">Notas (opcional)</label>
+            <textarea id="task_notes" name="notes" rows="3" placeholder="Ej: leer capítulo 4"></textarea>
+          </div>
+          <button type="submit" class="btn-primary">Añadir tarea</button>
+        </form>
+      </details>
     </div>
 
     <div class="card" style="margin-bottom:14px;">
-      <h2 style="margin-top:0;">Añadir examen</h2>
-      <form method="post" action="{{ url_for('calendar_exam_create') }}">
-        <div>
-          <label for="exam_subject">Asignatura</label>
-          <select id="exam_subject" name="subject_id">
-            <option value="">(elige asignatura)</option>
-            {% for s in subjects %}
-              <option value="{{ s.id }}">{{ s.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="exam_subject_new">O nueva asignatura</label>
+      <details>
+        <summary class="details-toggle">Añadir examen</summary>
+        <form method="post" action="{{ url_for('calendar_exam_create') }}" style="margin-top:10px;">
+          <div>
+            <label for="exam_subject">Asignatura</label>
+            <select id="exam_subject" name="subject_id">
+              <option value="">(elige asignatura)</option>
+              {% for s in subjects %}
+                <option value="{{ s.id }}">{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="exam_subject_new">O nueva asignatura</label>
           <input id="exam_subject_new" name="new_subject" type="text" maxlength="120" placeholder="Ej: Física" />
-        </div>
-        <div>
-          <label for="exam_subject_color">Color de la nueva asignatura (opcional)</label>
-          <input id="exam_subject_color" name="new_subject_color" type="color" value="#94a3b8" />
-        </div>
-        <p class="subtle">Elige una asignatura existente o escribe una nueva.</p>
-        <div>
-          <label for="exam_date">Fecha de examen</label>
-          <input id="exam_date" name="exam_date" type="date" required />
-        </div>
-        <div>
-          <label for="exam_tema">Tema</label>
+          </div>
+          <div>
+            <label for="exam_subject_color">Color de la nueva asignatura (opcional)</label>
+            <input id="exam_subject_color" name="new_subject_color" type="color" value="#94a3b8" />
+          </div>
+          <p class="subtle">Elige una asignatura existente o escribe una nueva.</p>
+          <div>
+            <label for="exam_date">Fecha de examen</label>
+            <input id="exam_date" name="exam_date" type="date" required />
+          </div>
+          <div>
+            <label for="exam_tema">Tema</label>
           <input id="exam_tema" name="tema" type="text" maxlength="200" placeholder="Ej: Álgebra lineal" required />
         </div>
         <p class="subtle">Si la fecha queda fuera del periodo visible, aparecerá cuando elijas un rango más amplio.</p>
-        <button type="submit" class="btn-primary">Añadir examen</button>
-      </form>
+          <button type="submit" class="btn-primary">Añadir examen</button>
+        </form>
+      </details>
     </div>
 
     <div class="card">
