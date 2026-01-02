@@ -9,19 +9,6 @@
   </head>
 
   <body data-just-logged-in="{{ '1' if just_logged_in else '' }}" data-just-registered="{{ '1' if just_registered else '' }}" data-profe-busy="{{ '1' if profe_busy else '' }}" data-llm-busy="{{ '1' if llm_busy else '' }}" data-page="{{ request.endpoint or '' }}">
-    <header class="topbar">
-      <div class="topbar__inner">
-        <a class="brand" href="{{ url_for('dashboard') }}">Flask DevOps Demo</a>
-
-        {% if current_user.is_authenticated %}
-          <nav class="topbar__nav">
-            <a href="{{ url_for('dashboard') }}">Menú</a>
-            <a href="{{ url_for('logout') }}">Salir</a>
-          </nav>
-        {% endif %}
-      </div>
-    </header>
-
     <main class="page">
       <div class="container">
         {% if request.endpoint not in ("login", "register") %}
