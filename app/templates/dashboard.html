@@ -21,7 +21,7 @@
             <p class="subtle" style="margin:4px 0 0;">Periodo: {{ calendar_window_label }}</p>
           {% endif %}
         </div>
-        <a class="link-pill" href="{{ url_for('task_calendar') }}">Abrir calendario</a>
+        <a class="nav-option btn-primary" href="{{ url_for('task_calendar') }}">Abrir calendario</a>
       </div>
       {% if calendar_items %}
         <div style="display:grid; gap:10px; margin-top:12px;">
