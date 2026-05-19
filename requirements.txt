@@ -3,6 +3,8 @@ gunicorn
 Flask-SQLAlchemy
 Flask-Login
 Flask-WTF
+Flask-Limiter
+Flask-Migrate
 requests
 PyPDF2
 python-pptx

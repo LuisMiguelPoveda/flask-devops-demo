@@ -18,12 +18,15 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from PyPDF2 import PdfReader
 from pptx import Presentation
-from sqlalchemy import event, text
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
 from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_migrate import Migrate
 from flask_login import (
     LoginManager,
     login_user,
@@ -105,6 +108,9 @@ HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
 _worker_lock_handle = None
+
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
+migrate = Migrate()
 JOB_RETRY_SECONDS = 30
 INCOMPLETE_JOB_STATUSES = ("pending", "running")
 
@@ -1238,12 +1244,19 @@ def create_app():
                 cursor.close()
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
     CSRFProtect(app)
+    limiter.init_app(app)
 
     login_manager = LoginManager()
     login_manager.login_view = "login"
     login_manager.init_app(app)
+
+    @app.errorhandler(429)
+    def ratelimit_handler(e):
+        flash("Demasiados intentos. Espera un momento antes de volver a intentarlo.", "danger")
+        return redirect(request.referrer or url_for("login")), 429
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_file_too_large(_error):
@@ -1339,39 +1352,7 @@ def create_app():
             return None
         return lock_file
 
-    def ensure_profile_schema():
-        try:
-            if not app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
-                return
-            rows = db.session.execute(text("PRAGMA table_info(student_profiles)")).all()
-            columns = {row[1] for row in rows}
-            alter_statements = []
-            if "llm_profile" not in columns:
-                alter_statements.append("ALTER TABLE student_profiles ADD COLUMN llm_profile VARCHAR(20)")
-            if "task_window_days" not in columns:
-                alter_statements.append("ALTER TABLE student_profiles ADD COLUMN task_window_days INTEGER")
-            for statement in alter_statements:
-                db.session.execute(text(statement))
-            if alter_statements:
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
-
     with app.app_context():
-        db_lock = acquire_process_lock("flask-devops-demo-db-init.lock", blocking=True)
-        try:
-            db.create_all()
-        except Exception as exc:
-            message = str(exc).lower()
-            if "already exists" not in message:
-                raise
-        try:
-            ensure_profile_schema()
-        finally:
-            if db_lock:
-                fcntl.flock(db_lock.fileno(), fcntl.LOCK_UN)
-                db_lock.close()
-
         global _worker_started, _worker_lock_handle
         if not _worker_started:
             if _worker_lock_handle is None:
@@ -1451,6 +1432,7 @@ def create_app():
 
     # ---------- AUTH ----------
     @app.route("/", methods=["GET", "POST"])
+    @limiter.limit("10 per minute", methods=["POST"])
     def login():
         if current_user.is_authenticated:
             if not is_setup_complete(current_user.id):
@@ -1474,6 +1456,7 @@ def create_app():
         return render_template("login.html")
 
     @app.route("/register", methods=["GET", "POST"])
+    @limiter.limit("5 per hour", methods=["POST"])
     def register():
         if current_user.is_authenticated:
             if not is_setup_complete(current_user.id):
@@ -2591,6 +2574,7 @@ def create_app():
     # ---------- Ask Profe ----------
     @app.route("/ask-profe", methods=["GET", "POST"])
     @login_required
+    @limiter.limit("20 per minute", methods=["POST"])
     def ask_profe():
         now = datetime.utcnow()
         lock = get_active_profe_lock(now=now)

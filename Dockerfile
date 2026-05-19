@@ -25,11 +25,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY migrations ./migrations
 
 COPY --from=css-builder /app/app/static/css ./app/static/css
 
 EXPOSE 5000
 
-# --preload: app loads once in master before forking, ensuring a consistent
-# SECRET_KEY across all workers (required for session/CSRF to work).
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "300", "--workers", "2", "--threads", "4", "app:create_app()"]
+ENV FLASK_APP=app
+
+CMD ["sh", "-c", "flask db upgrade && gunicorn -b 0.0.0.0:5000 --timeout 300 --workers 2 --threads 4 'app:create_app()'"]

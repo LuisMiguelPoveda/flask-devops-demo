@@ -58,6 +58,16 @@ DESARROLLO LOCAL (sin Docker)
    flask run
    # Abrir http://127.0.0.1:5000
 
+CAMBIOS DE SCHEMA (modelos de BD)
+----------------------------------
+Cada vez que modifiques app/models.py:
+   source .venv/bin/activate
+   flask db migrate -m "descripcion del cambio"
+   # revisar el fichero generado en migrations/versions/
+   git add migrations/versions/
+   git commit -m "migration: descripcion del cambio"
+   docker compose up --build   # flask db upgrade corre automaticamente al arrancar
+
 VARIABLES DE ENTORNO RELEVANTES
 ---------------------------------
    SECRET_KEY_FILE      ruta al fichero con la clave de sesion (Docker secret)

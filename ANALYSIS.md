@@ -32,6 +32,8 @@ flask-devops-demo/
 │       ├── scss/main.scss  # SCSS source (1,030 lines)
 │       ├── css/main.css    # Compiled output (minified)
 │       └── js/             # nav.js, file_drop.js, mascot.js
+├── migrations/             # Flask-Migrate schema history (Alembic)
+│   └── versions/           # One file per schema change
 ├── tests/test_basic.py     # pytest suite
 ├── Dockerfile              # Multi-stage build (Node/Sass → Python)
 ├── docker-compose.yml      # Flask + PostgreSQL 16 + secrets
@@ -208,8 +210,9 @@ CSS is compiled from SCSS ([app/static/scss/main.scss](app/static/scss/main.scss
 
 ### Docker (Multi-stage `Dockerfile`)
 - **Stage 1 (Node 22 Alpine):** Compile SCSS → CSS (compressed, no source maps)
-- **Stage 2 (Python 3.12-slim):** Install dependencies, copy compiled CSS, expose port 5000
-- **CMD:** `gunicorn` — 2 workers, 4 threads, 300s timeout, no `--preload`
+- **Stage 2 (Python 3.12-slim):** Install dependencies, copy app + `migrations/`, expose port 5000
+- **ENV:** `FLASK_APP=app`
+- **CMD:** `flask db upgrade && gunicorn` — migrations applied before workers start; 2 workers, 4 threads, 300s timeout, no `--preload`
 
 Each worker calls `create_app()` independently and reads `SECRET_KEY` from the same Docker secret file — consistent keys without shared pre-fork connections. `--preload` was removed because it caused workers to inherit PostgreSQL connections opened in the master process, corrupting the libpq protocol state after `fork()`.
 
@@ -287,6 +290,8 @@ gunicorn
 Flask-SQLAlchemy
 Flask-Login
 Flask-WTF          # CSRF protection
+Flask-Limiter      # Rate limiting (login, register, ask-profe)
+Flask-Migrate      # Schema migrations (Alembic)
 requests
 PyPDF2
 python-pptx
@@ -310,9 +315,9 @@ sass ^1.95.0       # SCSS compiler (devDependency)
 | Multi-worker session consistency | All workers read same `SECRET_KEY_FILE` independently |
 | DB connection health after fork | `pool_pre_ping=True` for PostgreSQL |
 | `app.db` in git | Removed (gitignored) |
-| Rate limiting | Not implemented |
+| Rate limiting | Flask-Limiter: login 10/min, register 5/h, ask-profe 20/min (per IP) |
 | File blobs in DB | Up to 50 MB per file stored as `LargeBinary` |
-| Schema migrations | Manual (`ensure_profile_schema`); no Flask-Migrate |
+| Schema migrations | Flask-Migrate (Alembic); `flask db upgrade` runs at container startup |
 | `POSTGRES_PASSWORD` in docker-compose | Docker secret (`POSTGRES_PASSWORD_FILE`) |
 
 ---
