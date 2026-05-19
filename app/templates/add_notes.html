@@ -62,6 +62,12 @@
         <input id="exam_date_manual" name="exam_date_manual" type="date" />
       </div>
 
+      <div id="tema-input-wrap">
+        <label for="tema_name">Nombre del tema (opcional)</label>
+        <input id="tema_name" name="tema_name" placeholder="Ej: Álgebra lineal" />
+        <small>Si la fecha es nueva, se creará el tema automáticamente.</small>
+      </div>
+
       <hr />
 
       <div class="check-row">
@@ -128,6 +134,14 @@
 
     const examSelect = document.getElementById("exam_date_choice");
     const examManual = document.getElementById("exam_date_manual");
+    const temaWrap = document.getElementById("tema-input-wrap");
+    const temaNameInput = document.getElementById("tema_name");
+
+    function updateTemaWrap() {
+      const choiceSelected = !!examSelect.value;
+      temaWrap.style.display = choiceSelected ? "none" : "block";
+      if (choiceSelected && temaNameInput) temaNameInput.value = "";
+    }
 
     const manualMode = document.getElementById("manual_mode");
     const manualFileMode = document.getElementById("manual_file_mode");
@@ -141,7 +155,7 @@
 
     async function loadExamDates(subjectId) {
       examSelect.innerHTML = '<option value="">(sin seleccionar)</option>';
-      if (!subjectId) return;
+      if (!subjectId) { updateTemaWrap(); return; }
 
       const resp = await fetch(`/api/exam-dates?subject_id=${encodeURIComponent(subjectId)}`);
       const data = await resp.json();
@@ -154,6 +168,7 @@
         opt.textContent = temaValue || dateValue;
         examSelect.appendChild(opt);
       });
+      updateTemaWrap();
     }
 
     function updateSubjectUI() {
@@ -193,10 +208,12 @@
 
     examSelect.addEventListener("change", () => {
       if (examSelect.value) examManual.value = "";
+      updateTemaWrap();
     });
 
     examManual.addEventListener("change", () => {
       if (examManual.value) examSelect.value = "";
+      updateTemaWrap();
     });
 
     manualMode.addEventListener("change", updateModeUI);

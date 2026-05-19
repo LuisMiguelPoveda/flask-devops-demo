@@ -5,6 +5,7 @@ __pycache__/
 node_modules/
 app/static/css/*.map
 funcionamiento.txt
+ANALYSIS.md
 secrets/
 app.db
 instance/

@@ -99,24 +99,24 @@
         <form method="post" action="{{ url_for('notes_merge') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div>
-            <label for="target_note">Destino</label>
+            <label for="target_note">Parte 2</label>
             <select id="target_note" name="target_note" required>
-              <option value="">(elige destino)</option>
+              <option value="">(elige parte 2)</option>
               {% for n in notes %}
                 <option value="{{ n.id }}">{{ n.subject.name }}: {{ n.title }}</option>
               {% endfor %}
             </select>
           </div>
           <div>
-            <label for="source_note">Origen (se copiará su contenido)</label>
+            <label for="source_note">Parte 1</label>
             <select id="source_note" name="source_note" required>
-              <option value="">(elige origen)</option>
+              <option value="">(elige parte 1)</option>
               {% for n in notes %}
                 <option value="{{ n.id }}">{{ n.subject.name }}: {{ n.title }}</option>
               {% endfor %}
             </select>
           </div>
-          <p class="subtle">Se añadirá el contenido del origen al final del destino. Ambos apuntes permanecerán.</p>
+          <p class="subtle">Se añadirá el contenido de la parte 1 al final de la parte 2.</p>
           <button type="submit">Combinar</button>
         </form>
       </div>
