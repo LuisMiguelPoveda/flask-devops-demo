@@ -4,6 +4,9 @@
 
 {% block content %}
   <div class="card">
+    <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      <a class="link-pill" href="{{ url_for('dashboard') }}">← Menú</a>
+    </div>
     <div class="profe-timer" id="profe-timer" data-ends-at="{{ lock_ends_at_ts }}">
       <span class="profe-timer__label">Tiempo reservado de tutoría restante:</span>
       <span class="profe-timer__value" id="profe-timer-value">{{ lock_remaining_label }}</span>

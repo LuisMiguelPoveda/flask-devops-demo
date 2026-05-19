@@ -350,7 +350,9 @@ def notes_list():
     if title_q:
         q = q.filter(Note.title.ilike(f"%{title_q}%"))
 
-    notes = q.order_by(Note.updated_at.desc()).all()
+    page = request.args.get("page", 1, type=int)
+    pagination = q.order_by(Note.updated_at.desc()).paginate(page=page, per_page=20, error_out=False)
+    notes = pagination.items
     tema_options = fetch_tema_options(current_user.id, subject_id)
     filters_active = bool(subject_id or tema_q or title_q)
     chunk_totals: dict[int, int] = {}
@@ -403,6 +405,7 @@ def notes_list():
         "notes_list.html",
         subjects=subjects,
         notes=notes,
+        pagination=pagination,
         filters={"subject_id": subject_id or "", "tema": tema_q, "title": title_q},
         chunk_totals=chunk_totals,
         note_models=note_models,

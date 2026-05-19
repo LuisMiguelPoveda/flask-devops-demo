@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Estudiar: {{ deck.title }}{% endblock %}
+
+{% block content %}
+<style>
+  .study-options { display: grid !important; grid-template-columns: 1fr !important; gap: 10px; padding: 0; margin: 0; }
+  .study-option   { display: block !important; width: 100% !important; padding: 14px 18px !important;
+                    border-radius: 12px !important; border: 2px solid rgba(0,0,0,.15) !important;
+                    background: #fff !important; color: #111 !important; cursor: pointer;
+                    font-size: 15px !important; font-weight: 500 !important; line-height: 1.45;
+                    text-align: left !important; transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease; }
+  .study-option:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.12); border-color: rgba(59,130,246,.5) !important; }
+  .study-option:disabled { cursor: default; }
+  .study-option.is-correct { background: #dcfce7 !important; border-color: #16a34a !important; color: #14532d !important; font-weight: 700 !important; }
+  .study-option.is-wrong   { background: #fee2e2 !important; border-color: #dc2626 !important; color: #7f1d1d !important; font-weight: 700 !important; }
+</style>
+<section class="shell">
+  <header class="section-header">
+    <div>
+      <h1 class="headline">Estudiar</h1>
+      <p class="subtle">{{ deck.subject.name }}: {{ deck.title }}</p>
+    </div>
+    <a class="link-pill" href="{{ url_for('flashcards_list') }}">← Flashcards</a>
+  </header>
+
+  {% if deck.flashcards %}
+    <div class="card" id="study-root">
+      <div class="study-progress">
+        <div class="study-progress__bar" id="study-bar"></div>
+      </div>
+      <div class="study-counter" id="study-counter"></div>
+
+      <div id="study-card">
+        <p class="study-question" id="study-question"></p>
+        <div class="study-options" id="study-options"></div>
+        <button type="button" class="study-next" id="study-next" hidden>Siguiente →</button>
+      </div>
+
+      <div id="study-summary" hidden>
+        <div class="empty-state">
+          <span class="empty-state__icon" id="study-score-icon"></span>
+          <p id="study-score-text" style="font-size:20px;font-weight:800;margin:0;color:#0f172a;"></p>
+          <p class="empty-state__hint" id="study-score-sub"></p>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:20px;flex-wrap:wrap;">
+          <button type="button" id="study-restart" class="link-pill link-pill--accent">Repetir</button>
+          <a class="link-pill" href="{{ url_for('flashcards_list') }}">← Volver</a>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="card">
+      <div class="empty-state">
+        <span class="empty-state__icon">🃏</span>
+        <p>Este deck no tiene flashcards.</p>
+        <p class="empty-state__hint">
+          <a href="{{ url_for('flashcards_edit', deck_id=deck.id) }}">Añade flashcards</a> para poder estudiar.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  var raw = {{ deck.flashcards | tojson }};
+  if (!raw || !raw.length) return;
+
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  var cards = shuffle(raw.slice());
+  var total = cards.length;
+  var current = 0;
+  var score = 0;
+
+  var bar       = document.getElementById('study-bar');
+  var counter   = document.getElementById('study-counter');
+  var questionEl = document.getElementById('study-question');
+  var optionsEl  = document.getElementById('study-options');
+  var nextBtn    = document.getElementById('study-next');
+  var cardEl     = document.getElementById('study-card');
+  var summaryEl  = document.getElementById('study-summary');
+  var restartBtn = document.getElementById('study-restart');
+
+  function updateProgress() {
+    bar.style.width = ((current / total) * 100) + '%';
+    counter.textContent = 'Carta ' + (current + 1) + ' de ' + total;
+  }
+
+  function renderCard(idx) {
+    var card = cards[idx];
+    questionEl.textContent = card.question;
+    optionsEl.innerHTML = '';
+    nextBtn.hidden = true;
+
+    var indices = card.options.map(function (_, i) { return i; });
+    shuffle(indices);
+
+    indices.forEach(function (origIdx) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'study-option';
+      btn.textContent = card.options[origIdx];
+      btn.dataset.correct = origIdx === card.correct_index ? '1' : '0';
+
+      btn.addEventListener('click', function () {
+        if (btn.disabled) return;
+        optionsEl.querySelectorAll('.study-option').forEach(function (opt) {
+          opt.disabled = true;
+          opt.classList.add('is-answered');
+          if (opt.dataset.correct === '1') opt.classList.add('is-correct');
+        });
+        if (btn.dataset.correct !== '1') {
+          btn.classList.add('is-wrong');
+        } else {
+          score++;
+        }
+        nextBtn.hidden = false;
+      });
+
+      optionsEl.appendChild(btn);
+    });
+
+    updateProgress();
+  }
+
+  nextBtn.addEventListener('click', function () {
+    current++;
+    if (current >= total) {
+      showSummary();
+    } else {
+      renderCard(current);
+    }
+  });
+
+  function showSummary() {
+    cardEl.hidden = true;
+    summaryEl.hidden = false;
+    bar.style.width = '100%';
+    counter.textContent = 'Completado';
+
+    var pct = Math.round((score / total) * 100);
+    document.getElementById('study-score-icon').textContent =
+      pct >= 80 ? '🏆' : pct >= 50 ? '👍' : '📖';
+    document.getElementById('study-score-text').textContent =
+      score + ' / ' + total + ' correctas';
+    document.getElementById('study-score-sub').textContent =
+      pct + '% — ' + (
+        pct >= 80 ? '¡Excelente trabajo!' :
+        pct >= 50 ? 'Bien, sigue practicando.' :
+        'Repasa el tema e inténtalo de nuevo.'
+      );
+  }
+
+  restartBtn.addEventListener('click', function () {
+    shuffle(cards);
+    current = 0;
+    score = 0;
+    cardEl.hidden = false;
+    summaryEl.hidden = true;
+    renderCard(0);
+  });
+
+  renderCard(0);
+})();
+</script>
+{% endblock %}

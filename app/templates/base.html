@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}App{% endblock %}</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=20">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=24">
   </head>
 
   <body data-just-logged-in="{{ '1' if just_logged_in else '' }}" data-just-registered="{{ '1' if just_registered else '' }}" data-profe-busy="{{ '1' if profe_busy else '' }}" data-llm-busy="{{ '1' if llm_busy else '' }}" data-page="{{ request.endpoint or '' }}">
@@ -14,9 +14,12 @@
         {% if request.endpoint not in ("login", "register") %}
           {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-              <div class="flash-stack">
+              <div class="toast-stack">
                 {% for category, message in messages %}
-                  <div class="flash flash--{{ category }}">{{ message }}</div>
+                  <div class="toast toast--{{ category }}" role="alert">
+                    <span class="toast__msg">{{ message }}</span>
+                    <button type="button" class="toast__close" aria-label="Cerrar">✕</button>
+                  </div>
                 {% endfor %}
               </div>
             {% endif %}

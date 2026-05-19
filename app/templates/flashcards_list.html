@@ -8,6 +8,7 @@
         <h1 class="headline">Flashcards</h1>
         <p class="subtle">Filtra, edita o borra tus decks.</p>
       </div>
+      <a class="link-pill" href="{{ url_for('dashboard') }}">← Menú</a>
     </header>
 
     <style>
@@ -113,7 +114,7 @@
       {% for d in decks %}
         {% set subject_color = d.subject.color or '#94a3b8' %}
         <div class="card subject-tint" style="margin-bottom:14px; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;">
             <div>
               <h3 style="margin:0;">{{ d.subject.name }}: {{ deck_display_title(d.title, d.exam_date) }}</h3>
               <p style="margin:4px 0 0 0;">
@@ -124,6 +125,9 @@
                 <strong>Flashcards:</strong> {{ d.flashcards|length }}
               </p>
             </div>
+            {% if d.flashcards %}
+              <a class="link-pill link-pill--accent" href="{{ url_for('flashcards_study', deck_id=d.id) }}" style="flex-shrink:0;">Estudiar →</a>
+            {% endif %}
           </div>
 
           <div class="details-row">
@@ -162,6 +166,18 @@
           </div>
         </div>
       {% endfor %}
+    {% endif %}
+
+    {% if pagination.pages > 1 %}
+      <nav class="page-nav" aria-label="Paginación">
+        {% if pagination.has_prev %}
+          <a class="page-btn" href="{{ url_for('flashcards_list', page=pagination.prev_num, subject_id=filters.subject_id if filters.subject_id else none, tema=filters.tema if filters.tema else none, title=filters.title if filters.title else none) }}">← Anterior</a>
+        {% endif %}
+        <span class="page-info">Página {{ pagination.page }} de {{ pagination.pages }}</span>
+        {% if pagination.has_next %}
+          <a class="page-btn" href="{{ url_for('flashcards_list', page=pagination.next_num, subject_id=filters.subject_id if filters.subject_id else none, tema=filters.tema if filters.tema else none, title=filters.title if filters.title else none) }}">Siguiente →</a>
+        {% endif %}
+      </nav>
     {% endif %}
   </section>
 

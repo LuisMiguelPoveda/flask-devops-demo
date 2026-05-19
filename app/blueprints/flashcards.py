@@ -241,7 +241,9 @@ def flashcards_list():
     if title_q:
         q = q.filter(FlashcardDeck.title.ilike(f"%{title_q}%"))
 
-    decks = q.order_by(FlashcardDeck.updated_at.desc()).all()
+    page = request.args.get("page", 1, type=int)
+    pagination = q.order_by(FlashcardDeck.updated_at.desc()).paginate(page=page, per_page=20, error_out=False)
+    decks = pagination.items
     deck_temas: dict[int, list[str]] = {}
     if decks:
         exam_pairs = {(d.subject_id, d.exam_date) for d in decks if d.exam_date}
@@ -269,6 +271,7 @@ def flashcards_list():
         "flashcards_list.html",
         subjects=subjects,
         decks=decks,
+        pagination=pagination,
         filters={"subject_id": subject_id or "", "tema": tema_q, "title": title_q},
         temas=tema_options,
         filters_active=filters_active,
@@ -433,6 +436,13 @@ def flashcards_edit(deck_id: int):
         default_count=FLASHCARD_CHUNK_DEFAULT,
         jobs=Job.query.filter_by(user_id=current_user.id).order_by(Job.created_at.desc()).limit(10).all(),
     )
+
+
+@flashcards_bp.route("/flashcards/<int:deck_id>/study", endpoint="flashcards_study")
+@login_required
+def flashcards_study(deck_id: int):
+    deck = FlashcardDeck.query.filter_by(id=deck_id, user_id=current_user.id).first_or_404()
+    return render_template("flashcards_study.html", deck=deck)
 
 
 @flashcards_bp.route("/flashcards/<int:deck_id>/delete", endpoint="flashcards_delete", methods=["POST"])

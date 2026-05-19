@@ -32,6 +32,18 @@
     setTimeout(() => document.addEventListener('click', outsideClick, true), 0);
   }, true);
 
+  // ─── Toast auto-dismiss ───────────────────────────────────────────────────
+  function dismissToast(toast) {
+    toast.classList.add('is-hiding');
+    setTimeout(function () { toast.remove(); }, 280);
+  }
+
+  document.querySelectorAll('.toast').forEach(function (toast) {
+    var btn = toast.querySelector('.toast__close');
+    if (btn) btn.addEventListener('click', function () { dismissToast(toast); });
+    setTimeout(function () { dismissToast(toast); }, 4500);
+  });
+
   // ─── Form validation: touch tracking ─────────────────────────────────────
   // Adds .touched on blur so :invalid CSS only fires after user has visited a field.
   document.addEventListener('blur', function (e) {

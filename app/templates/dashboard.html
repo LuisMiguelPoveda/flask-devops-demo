@@ -139,8 +139,9 @@
               {% if group.kind == "file_import" %}
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                   <div>
+                    <span class="queue-pulse">En proceso</span>
                     <strong>Archivo:</strong> {{ group.title }}
-                    <div class="subtle">Estado: {{ group.status }}</div>
+                    <span class="skeleton-bar"></span>
                   </div>
                   <form method="post" action="{{ url_for('cancel_jobs') }}" style="margin:0;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
@@ -152,15 +153,18 @@
               {% else %}
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                   <div>
+                    <span class="queue-pulse">En proceso</span>
                     <strong>Apunte:</strong> {{ group.title }}
                     {% if group.deck_titles %}
                       <div class="subtle">Decks: {{ group.deck_titles|join(', ') }}</div>
                     {% endif %}
                     {% if group.summary_total %}
                       <div class="subtle">Resumen: {{ group.summary_done }}/{{ group.summary_total }} fragmentos</div>
+                      <span class="skeleton-bar"></span>
                     {% endif %}
                     {% if group.flash_total %}
                       <div class="subtle">Flashcards: {{ group.flash_done }}/{{ group.flash_total }} fragmentos</div>
+                      <span class="skeleton-bar" style="width:45%"></span>
                     {% endif %}
                   </div>
                   <form method="post" action="{{ url_for('cancel_jobs') }}" style="margin:0;">

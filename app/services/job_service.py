@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from requests.exceptions import RequestException, Timeout
@@ -120,15 +120,21 @@ def build_queue_groups(user_id: int) -> list[dict]:
             if not group["earliest_incomplete"] or job_created < group["earliest_incomplete"]:
                 group["earliest_incomplete"] = job_created
 
+    _BATCH_WINDOW = timedelta(seconds=300)
+
     groups: list[dict] = []
     for note_id, group in note_groups.items():
-        start_at = group.get("earliest_incomplete")
-        if not start_at:
+        earliest_incomplete = group.get("earliest_incomplete")
+        if not earliest_incomplete:
             continue
+        # Anchor the window to 5 min before the oldest incomplete job so that
+        # chunks which have already completed (and thus are no longer the
+        # "earliest incomplete") stay in the window and count toward the total.
+        batch_start = earliest_incomplete - _BATCH_WINDOW
         jobs = [
             job
             for job in group["jobs"]
-            if (job.created_at or datetime.min) >= start_at
+            if (job.created_at or datetime.min) >= batch_start
         ]
         if not any(job.status in INCOMPLETE_JOB_STATUSES for job in jobs):
             continue
@@ -149,7 +155,7 @@ def build_queue_groups(user_id: int) -> list[dict]:
         note = notes.get(note_id)
         created_at = min(
             (job.created_at for job in jobs if job.created_at),
-            default=start_at,
+            default=earliest_incomplete,
         )
         groups.append(
             {

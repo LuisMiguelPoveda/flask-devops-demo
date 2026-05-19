@@ -4,7 +4,10 @@
 
 {% block content %}
   <div class="card">
-    <h2>Consultar apuntes</h2>
+    <div class="page-header-row">
+      <h2>Consultar apuntes</h2>
+      <a class="link-pill" href="{{ url_for('dashboard') }}">← Menú</a>
+    </div>
 
     <details {% if filters_active %}open{% endif %}>
       <summary>Filtros</summary>
@@ -97,6 +100,18 @@
           </div>
         </div>
       {% endfor %}
+    {% endif %}
+
+    {% if pagination.pages > 1 %}
+      <nav class="page-nav" aria-label="Paginación">
+        {% if pagination.has_prev %}
+          <a class="page-btn" href="{{ url_for('notes_list', page=pagination.prev_num, subject_id=filters.subject_id if filters.subject_id else none, tema=filters.tema if filters.tema else none, title=filters.title if filters.title else none) }}">← Anterior</a>
+        {% endif %}
+        <span class="page-info">Página {{ pagination.page }} de {{ pagination.pages }}</span>
+        {% if pagination.has_next %}
+          <a class="page-btn" href="{{ url_for('notes_list', page=pagination.next_num, subject_id=filters.subject_id if filters.subject_id else none, tema=filters.tema if filters.tema else none, title=filters.title if filters.title else none) }}">Siguiente →</a>
+        {% endif %}
+      </nav>
     {% endif %}
 
     {% if notes|length > 1 %}
