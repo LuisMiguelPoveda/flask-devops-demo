@@ -15,6 +15,7 @@
     <div class="card" style="margin-bottom:14px;">
       <h2 style="margin-top:0;">Periodo visible</h2>
       <form method="post" action="{{ url_for('task_calendar_window_update') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div>
           <label for="window_days">Mostrar próximos</label>
           <select id="window_days" name="window_days" required>
@@ -36,6 +37,7 @@
       <details>
         <summary class="details-toggle">Añadir tarea</summary>
         <form method="post" action="{{ url_for('calendar_task_create') }}" style="margin-top:10px;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div>
             <label for="task_title">Título</label>
             <input id="task_title" name="title" type="text" maxlength="200" required />
@@ -66,6 +68,7 @@
       <details>
         <summary class="details-toggle">Añadir examen</summary>
         <form method="post" action="{{ url_for('calendar_exam_create') }}" style="margin-top:10px;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div>
             <label for="exam_subject">Asignatura</label>
             <select id="exam_subject" name="subject_id">
@@ -149,6 +152,7 @@
                   <details>
                     <summary class="details-toggle">Editar tarea</summary>
                     <form method="post" action="{{ url_for('calendar_task_update', task_id=item.task.id) }}" style="margin-top:10px;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                       <div>
                         <label for="task_title_{{ item.task.id }}">Título</label>
                         <input id="task_title_{{ item.task.id }}" name="title" type="text" maxlength="200" value="{{ item.task.title }}" required />
@@ -175,6 +179,7 @@
                   </details>
 
                   <form method="post" action="{{ url_for('calendar_task_delete', task_id=item.task.id) }}" class="details-row__action">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Borrar esta tarea?');">Borrar</button>
                   </form>
                 </div>

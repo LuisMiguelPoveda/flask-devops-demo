@@ -8,6 +8,7 @@
     <p>{{ subtext or "Completa el perfil para personalizar la experiencia del profe." }}</p>
 
     <form method="post" id="setup-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div>
         <label for="student_name">Nombre del estudiante</label>
         <input id="student_name" name="student_name" value="{{ student_name or '' }}" required />

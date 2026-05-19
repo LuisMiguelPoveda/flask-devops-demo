@@ -2,6 +2,8 @@ Flask
 gunicorn
 Flask-SQLAlchemy
 Flask-Login
+Flask-WTF
 requests
 PyPDF2
 python-pptx
+psycopg2-binary

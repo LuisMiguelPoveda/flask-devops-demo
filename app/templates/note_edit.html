@@ -7,6 +7,7 @@
     <h2>Editar apunte</h2>
 
     <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div>
         <label for="subject_id">Asignatura</label>
         <select id="subject_id" name="subject_id" required>

@@ -83,6 +83,7 @@
             </details>
 
             <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" class="details-row__action">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Seguro que quieres borrar este apunte?');">
                 Borrar
               </button>
@@ -96,6 +97,7 @@
       <div class="card" style="margin-top:1rem;">
         <h3>Combinar apuntes</h3>
         <form method="post" action="{{ url_for('notes_merge') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <div>
             <label for="target_note">Destino</label>
             <select id="target_note" name="target_note" required>

@@ -28,6 +28,8 @@ jobs:
           pip install pytest
 
       - name: Run tests
+        env:
+          SECRET_KEY: ci-test-secret-not-for-production
         run: pytest
 
       - name: Set up Node and Sass

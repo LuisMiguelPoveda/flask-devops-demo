@@ -29,6 +29,7 @@
       {% endwith %}
 
       <form method="post" class="auth-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div>
           <label for="username">Usuario</label>
           <input id="username" name="username" autocomplete="username" required />

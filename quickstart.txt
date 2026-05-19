@@ -1,3 +1,67 @@
-docker build -t flask-devops-demo .
-docker run --rm --network host   flask-devops-demo
-cloudflared tunnel --url http://localhost:5000
+QUICKSTART — flask-devops-demo
+==============================
+
+REQUISITOS PREVIOS
+------------------
+- Docker + Docker Compose V2  (comando: docker compose, sin guion)
+- LM Studio ejecutandose con un modelo cargado y servidor activo
+  * En LM Studio → Server Settings → habilitar "Listen on all interfaces" (o "0.0.0.0")
+  * Puerto por defecto: 1234
+
+PRIMERA VEZ — OPCION A (setup automatico)
+------------------------------------------
+El script instala dependencias del sistema, genera los secretos, ejecuta tests
+y arranca todos los servicios:
+
+   bash setup_project.sh
+
+PRIMERA VEZ — OPCION B (manual)
+---------------------------------
+1. Crear los secretos:
+   mkdir -p secrets
+   python3 -c "import secrets; print(secrets.token_hex(32))" > secrets/secret_key.txt
+   python3 -c "import secrets; print(secrets.token_hex(24))" > secrets/postgres_password.txt
+
+2. Arrancar todos los servicios:
+   docker compose up --build
+
+3. Abrir en el navegador: http://localhost:5000
+
+REINICIOS POSTERIORES (sin rebuild)
+------------------------------------
+   docker compose up
+
+REBUILD TRAS CAMBIOS DE CODIGO
+--------------------------------
+   docker compose up --build
+
+PARAR Y CONSERVAR DATOS
+------------------------
+   docker compose down          # los datos en postgres_data se conservan
+
+PARAR Y BORRAR TODOS LOS DATOS
+--------------------------------
+   docker compose down -v       # elimina el volumen postgres_data
+
+VER LOGS EN VIVO
+-----------------
+   docker compose logs -f app
+   docker compose logs -f db
+
+DESARROLLO LOCAL (sin Docker)
+------------------------------
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   npm install && npm run build-css          # compilar SCSS (opcional)
+   export FLASK_APP=app FLASK_RUN_HOST=0.0.0.0
+   flask run
+   # Abrir http://127.0.0.1:5000
+
+VARIABLES DE ENTORNO RELEVANTES
+---------------------------------
+   SECRET_KEY_FILE      ruta al fichero con la clave de sesion (Docker secret)
+   SQLALCHEMY_DATABASE_URI  URL de base de datos (default: sqlite:///app.db en dev)
+   LMSTUDIO_API_BASE    endpoint de LM Studio (default en Docker: http://host.docker.internal:1234/v1)
+   LMSTUDIO_MODEL       nombre del modelo a usar (ej: google/gemma-3-1b)
+   LMSTUDIO_TIMEOUT     timeout de llamadas al LLM en segundos (default: 300)

@@ -8,6 +8,7 @@
     <p>Puedes añadirlos ahora o dejarlo para más adelante.</p>
 
     <form method="post" id="subjects-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div id="subjects-root" style="display:grid; gap:12px;"></div>
 
       <button class="btn-primary" type="button" id="add-subject-btn" style="width:fit-content;">

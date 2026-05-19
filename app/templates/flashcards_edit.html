@@ -15,6 +15,7 @@
     <p>Selecciona un apunte/resumen; se generarán tarjetas por fragmento según la cantidad elegida.</p>
 
     <form method="post" class="stack" id="ai-append-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <input type="hidden" name="mode" value="append_ai" />
 
       <label class="label">Modelo</label>
@@ -54,6 +55,7 @@
   {% set subject_color = deck.subject.color or '#94a3b8' %}
   <div class="card subject-tint" style="padding:16px; border-left:8px solid {{ subject_color }}; background: linear-gradient(rgba(255,255,255,.6), rgba(255,255,255,.6)), {{ subject_color }};">
     <form method="post" id="edit-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <input type="hidden" name="mode" value="manual" />
       <div>
         <label class="label">Asignatura</label>
@@ -114,6 +116,7 @@
     <div class="card" style="margin-top:12px;">
       <h3>Combinar con otro deck</h3>
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="mode" value="merge" />
         <label class="label">Elige deck a fusionar en este</label>
         <select class="input" name="merge_deck_id" required>

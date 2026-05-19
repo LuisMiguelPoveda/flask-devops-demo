@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: flask_devops
+      POSTGRES_USER: flask_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      LMSTUDIO_API_BASE: http://host.docker.internal:1234/v1
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: flask_devops
+      DB_USER: flask_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    secrets:
+      - secret_key
+      - postgres_password
+    depends_on:
+      db:
+        condition: service_healthy
+
+secrets:
+  secret_key:
+    file: ./secrets/secret_key.txt
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
+volumes:
+  postgres_data:

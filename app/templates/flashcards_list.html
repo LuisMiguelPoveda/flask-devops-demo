@@ -148,6 +148,7 @@
             </details>
 
             <form method="post" action="{{ url_for('flashcards_delete', deck_id=d.id) }}" class="details-row__action">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Borrar este deck?');">
                 Borrar
               </button>

@@ -3,7 +3,6 @@ set -euo pipefail
 
 ### CONFIG ###
 
-# GitHub repo URL (change here if you ever rename/move it)
 REPO_URL="https://github.com/LuisMiguelPoveda/flask-devops-demo.git"
 PROJECT_DIR="flask-devops-demo"
 
@@ -32,6 +31,22 @@ if ! groups "$USER" | grep -q "\bdocker\b"; then
   echo "      before 'docker' commands work without sudo."
 fi
 
+##################################
+# 0b. Ensure Docker Compose V2   #
+##################################
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "==> Docker Compose V2 not found, installing as CLI plugin..."
+  DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
+  mkdir -p "$DOCKER_CONFIG/cli-plugins"
+  curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
+    -o "$DOCKER_CONFIG/cli-plugins/docker-compose"
+  chmod +x "$DOCKER_CONFIG/cli-plugins/docker-compose"
+  echo "   -> Installed: $(docker compose version)"
+else
+  echo "==> Docker Compose V2 already available: $(docker compose version)"
+fi
+
 #########################
 # 1. Clone / update repo #
 #########################
@@ -51,8 +66,30 @@ fi
 PROJECT_ROOT="$(pwd)"
 echo "==> Working in $PROJECT_ROOT"
 
+##################################
+# 2. Generate Docker secrets     #
+##################################
+
+mkdir -p secrets
+
+if [ ! -f "secrets/secret_key.txt" ]; then
+  echo "==> Generating SECRET_KEY..."
+  python3 -c "import secrets; print(secrets.token_hex(32))" > secrets/secret_key.txt
+  echo "   -> secrets/secret_key.txt created"
+else
+  echo "==> secrets/secret_key.txt already exists, skipping"
+fi
+
+if [ ! -f "secrets/postgres_password.txt" ]; then
+  echo "==> Generating POSTGRES_PASSWORD..."
+  python3 -c "import secrets; print(secrets.token_hex(24))" > secrets/postgres_password.txt
+  echo "   -> secrets/postgres_password.txt created"
+else
+  echo "==> secrets/postgres_password.txt already exists, skipping"
+fi
+
 #################################
-# 2. Create & activate venv     #
+# 3. Create & activate venv     #
 #################################
 
 if [ ! -d ".venv" ]; then
@@ -67,19 +104,15 @@ source .venv/bin/activate
 echo "==> Using Python: $(python --version)"
 
 #################################
-# 3. Install Python dependencies #
+# 4. Install Python dependencies #
 #################################
 
-if [ -f "requirements.txt" ]; then
-  echo "==> Installing Python dependencies from requirements.txt..."
-  python -m pip install --upgrade pip
-  pip install -r requirements.txt
-else
-  echo "!! requirements.txt not found, skipping Python deps install"
-fi
+echo "==> Installing Python dependencies from requirements.txt..."
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 
 #################################
-# 4. Install Node deps & build CSS #
+# 5. Install Node deps & build CSS #
 #################################
 
 if [ -f "package.json" ]; then
@@ -93,54 +126,32 @@ else
 fi
 
 ########################
-# 5. Run Python tests  #
+# 6. Run Python tests  #
 ########################
 
-if command -v pytest >/dev/null 2>&1; then
-  echo "==> Running tests with pytest..."
-  if ! pytest; then
-    echo "!! Tests failed (pytest returned non-zero)."
-    echo "   Script will continue, but you should fix tests."
-  fi
-else
-  echo "==> Installing pytest..."
-  pip install pytest
-  echo "==> Running tests with pytest..."
-  if ! pytest; then
-    echo "!! Tests failed (pytest returned non-zero)."
-    echo "   Script will continue, but you should fix tests."
-  fi
+echo "==> Running tests with pytest..."
+if ! pytest; then
+  echo "!! Tests failed. Script will continue, but you should fix tests before deploying."
 fi
 
-########################################
-# 6. Optionally create an initial user #
-########################################
+####################################
+# 7. Build and start with Compose  #
+####################################
 
-if [ -f "create_user.py" ]; then
-  echo
-  read -r -p "Do you want to create an initial user now? [y/N] " CREATE_USER
-  if [[ "${CREATE_USER:-N}" =~ ^[Yy]$ ]]; then
-    echo "==> Running create_user.py..."
-    python create_user.py
-  else
-    echo "==> Skipping user creation for now."
+echo "==> Building and starting services with Docker Compose..."
+docker compose up --build -d
+
+echo "==> Waiting for app to be ready..."
+for i in $(seq 1 20); do
+  if curl -s -o /dev/null -w "%{http_code}" http://localhost:5000 | grep -qE "^(200|302)"; then
+    echo "   -> App is up!"
+    break
   fi
-else
-  echo "!! create_user.py not found, skipping user creation step."
-fi
-
-########################
-# 7. Build Docker image #
-########################
-
-if command -v docker >/dev/null 2>&1; then
-  echo "==> Building Docker image 'flask-devops-demo'..."
-  if ! docker build -t flask-devops-demo .; then
-    echo "!! Docker build failed. Check Docker daemon and Dockerfile."
+  sleep 2
+  if [ "$i" -eq 20 ]; then
+    echo "   -> App did not respond after 40s. Check logs with: docker compose logs app"
   fi
-else
-  echo "!! docker command not found. Is Docker installed correctly?"
-fi
+done
 
 #################################
 # 8. Final instructions summary #
@@ -153,35 +164,43 @@ Setup complete for project at:
   $PROJECT_ROOT
 ========================================================
 
-Common commands you'll use next:
-
-# Activate virtual environment
-cd "$PROJECT_ROOT"
-source .venv/bin/activate
-
-# Run Flask app (dev mode)
-export FLASK_APP=app
-export FLASK_RUN_HOST=0.0.0.0
-flask run
-
-# Run tests
-pytest
-
-# Rebuild CSS after editing SCSS
-npm run build-css
-
-# Build Docker image (if you change code)
-docker build -t flask-devops-demo .
-
-# Run Docker container
-docker run --rm -p 5000:5000 flask-devops-demo
-
-Then open in browser:
-  http://127.0.0.1:5000
-or
+The app is running at:
   http://localhost:5000
 
+Useful commands:
+
+  # View live logs
+  docker compose logs -f
+
+  # Stop containers (data is preserved)
+  docker compose down
+
+  # Stop and delete all data
+  docker compose down -v
+
+  # Rebuild after code changes
+  docker compose up --build
+
+  # Local dev (without Docker)
+  source .venv/bin/activate
+  export FLASK_APP=app FLASK_RUN_HOST=0.0.0.0
+  flask run
+
+  # Run tests
+  pytest
+
+  # Rebuild CSS after editing SCSS
+  npm run build-css
+
 ========================================================
+IMPORTANT: secrets/ contains generated keys.
+They are gitignored and must not be committed.
+If you delete them, recreate them with:
+  python3 -c "import secrets; print(secrets.token_hex(32))" > secrets/secret_key.txt
+  python3 -c "import secrets; print(secrets.token_hex(24))" > secrets/postgres_password.txt
+Then run: docker compose down -v && docker compose up --build
+========================================================
+
 NOTE: If 'docker' commands fail with a permissions error,
 log out and log back in so the 'docker' group change
 takes effect, then try again.

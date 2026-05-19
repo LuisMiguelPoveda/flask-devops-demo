@@ -17,6 +17,7 @@
     </div>
 
     <form method="post" enctype="multipart/form-data" id="notes-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div>
         <label for="model">Modelo (solo si usas IA)</label>
         <select id="model" name="model">

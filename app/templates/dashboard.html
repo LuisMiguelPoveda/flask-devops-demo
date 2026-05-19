@@ -140,6 +140,7 @@
                     <div class="subtle">Estado: {{ group.status }}</div>
                   </div>
                   <form method="post" action="{{ url_for('cancel_jobs') }}" style="margin:0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="group_kind" value="file_import" />
                     <input type="hidden" name="job_id" value="{{ group.job_id }}" />
                     <button type="submit" class="btn-primary" onclick="return confirm('¿Cancelar este archivo y su cola asociada?');">Cancelar todo</button>
@@ -160,6 +161,7 @@
                     {% endif %}
                   </div>
                   <form method="post" action="{{ url_for('cancel_jobs') }}" style="margin:0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="group_kind" value="note" />
                     <input type="hidden" name="note_id" value="{{ group.note_id }}" />
                     <button type="submit" class="btn-primary" onclick="return confirm('¿Cancelar esta generación y borrar resultados parciales?');">Cancelar todo</button>

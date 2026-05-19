@@ -25,6 +25,7 @@
         <p>Selecciona un apunte/resumen, modelo y cuántas flashcards quieres. Se guardarán automáticamente.</p>
 
         <form method="post" class="stack" id="ai-create-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="mode" value="ai" />
 
           <div style="padding:10px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:10px; margin-bottom:8px;">
@@ -86,6 +87,7 @@
         <p>Una flashcard con 4 opciones y la correcta marcada.</p>
 
         <form method="post" id="manual-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <input type="hidden" name="mode" value="manual" />
 
           <div>

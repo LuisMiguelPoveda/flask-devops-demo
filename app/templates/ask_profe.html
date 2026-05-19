@@ -12,6 +12,7 @@
     <p>Escribe tu duda, elige un modelo y pulsa Enviar.</p>
 
     <form method="post" id="ask-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div>
         <label for="model">Modelo</label>
         <select id="model" name="model">

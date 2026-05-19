@@ -23,6 +23,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
+from flask_wtf.csrf import CSRFProtect
 from flask_login import (
     LoginManager,
     login_user,
@@ -1187,8 +1188,36 @@ def create_app():
     app.config["ASK_PROFE_SESSION_SECONDS"] = int(os.getenv("ASK_PROFE_SESSION_SECONDS", "300"))
 
     # App/DB
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me-in-production")
-    db_uri = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.db")
+    _secret = os.getenv("SECRET_KEY")
+    if not _secret:
+        _secret_file = os.getenv("SECRET_KEY_FILE", "/run/secrets/secret_key")
+        if os.path.exists(_secret_file):
+            with open(_secret_file) as _f:
+                _secret = _f.read().strip()
+    if not _secret:
+        import secrets as _secrets
+        import warnings
+        _secret = _secrets.token_hex(32)
+        warnings.warn(
+            "SECRET_KEY not set — using ephemeral key. All sessions will reset on restart.",
+            stacklevel=2,
+        )
+    app.config["SECRET_KEY"] = _secret
+    db_uri = os.getenv("SQLALCHEMY_DATABASE_URI")
+    if not db_uri:
+        _db_host = os.getenv("DB_HOST")
+        if _db_host:
+            _pw = ""
+            _pw_file = os.getenv("DB_PASSWORD_FILE")
+            if _pw_file and os.path.exists(_pw_file):
+                with open(_pw_file) as _f:
+                    _pw = _f.read().strip()
+            _db_user = os.getenv("DB_USER", "postgres")
+            _db_port = os.getenv("DB_PORT", "5432")
+            _db_name = os.getenv("DB_NAME", "postgres")
+            db_uri = f"postgresql+psycopg2://{_db_user}:{_pw}@{_db_host}:{_db_port}/{_db_name}"
+        else:
+            db_uri = "sqlite:///app.db"
     app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     if db_uri.startswith("sqlite"):
@@ -1196,6 +1225,9 @@ def create_app():
         connect_args = engine_options.setdefault("connect_args", {})
         connect_args.setdefault("timeout", 30)
         connect_args.setdefault("check_same_thread", False)
+    else:
+        engine_options = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+        engine_options.setdefault("pool_pre_ping", True)
 
         @event.listens_for(Engine, "connect")
         def set_sqlite_pragma(dbapi_connection, _connection_record):
@@ -1206,6 +1238,8 @@ def create_app():
                 cursor.close()
 
     db.init_app(app)
+
+    CSRFProtect(app)
 
     login_manager = LoginManager()
     login_manager.login_view = "login"
@@ -1279,10 +1313,10 @@ def create_app():
 
     @app.before_request
     def enforce_setup_completion():
-        if not current_user.is_authenticated:
-            return None
         endpoint = request.endpoint or ""
         if endpoint in ("login", "register", "logout", "setup", "static"):
+            return None
+        if not current_user.is_authenticated:
             return None
         if not is_setup_complete(current_user.id):
             return redirect(url_for("setup"))

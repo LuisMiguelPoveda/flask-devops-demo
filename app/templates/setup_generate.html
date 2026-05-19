@@ -8,6 +8,7 @@
     <p>Sube archivos para cada examen y generaremos resúmenes y flashcards automáticamente.</p>
 
     <form method="post" enctype="multipart/form-data" id="setup-generate-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div>
         <label for="default_model">Elige el modelo de generación por defecto</label>
         <select id="default_model" name="default_model">
