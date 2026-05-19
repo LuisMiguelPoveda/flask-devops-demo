@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}App{% endblock %}</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=19">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v=20">
   </head>
 
   <body data-just-logged-in="{{ '1' if just_logged_in else '' }}" data-just-registered="{{ '1' if just_registered else '' }}" data-profe-busy="{{ '1' if profe_busy else '' }}" data-llm-busy="{{ '1' if llm_busy else '' }}" data-page="{{ request.endpoint or '' }}">
@@ -58,6 +58,7 @@
     {% endif %}
 
     <!--defer + cache busting -->
+    <script defer src="{{ url_for('static', filename='js/ui.js') }}?v=1"></script>
     <script defer src="{{ url_for('static', filename='js/nav.js') }}?v=1"></script>
     <script defer src="{{ url_for('static', filename='js/file_drop.js') }}?v=1"></script>
     {% if current_user.is_authenticated %}

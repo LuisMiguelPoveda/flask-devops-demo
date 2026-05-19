@@ -62,7 +62,10 @@
           {% endfor %}
         </div>
       {% else %}
-        <p style="margin-top:12px;">No hay tareas ni exámenes en este periodo.</p>
+        <div class="empty-state" style="color:rgba(255,255,255,.65);">
+          <span class="empty-state__icon">🗓️</span>
+          <p>No hay tareas ni exámenes en este periodo.</p>
+        </div>
       {% endif %}
     </div>
 
@@ -143,7 +146,7 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="group_kind" value="file_import" />
                     <input type="hidden" name="job_id" value="{{ group.job_id }}" />
-                    <button type="submit" class="btn-primary" onclick="return confirm('¿Cancelar este archivo y su cola asociada?');">Cancelar todo</button>
+                    <button type="submit" class="btn-primary" data-confirm="¿Cancelar este archivo y su cola asociada?">Cancelar todo</button>
                   </form>
                 </div>
               {% else %}
@@ -164,7 +167,7 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <input type="hidden" name="group_kind" value="note" />
                     <input type="hidden" name="note_id" value="{{ group.note_id }}" />
-                    <button type="submit" class="btn-primary" onclick="return confirm('¿Cancelar esta generación y borrar resultados parciales?');">Cancelar todo</button>
+                    <button type="submit" class="btn-primary" data-confirm="¿Cancelar esta generación y borrar resultados parciales?">Cancelar todo</button>
                   </form>
                 </div>
               {% endif %}

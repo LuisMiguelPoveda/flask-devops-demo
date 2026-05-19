@@ -180,7 +180,7 @@
 
                   <form method="post" action="{{ url_for('calendar_task_delete', task_id=item.task.id) }}" class="details-row__action">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Borrar esta tarea?');">Borrar</button>
+                    <button type="submit" class="action-link action-link--danger" data-confirm="¿Borrar esta tarea?">Borrar</button>
                   </form>
                 </div>
               {% endif %}

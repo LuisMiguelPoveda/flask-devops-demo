@@ -41,7 +41,13 @@
     </details>
 
     {% if notes|length == 0 %}
-      <p>No hay apuntes con esos filtros.</p>
+      <div class="card">
+        <div class="empty-state">
+          <span class="empty-state__icon">📝</span>
+          <p>No hay apuntes con esos filtros.</p>
+          <p class="empty-state__hint">Prueba a cambiar los filtros o <a href="{{ url_for('add_notes') }}">sube tus primeros apuntes</a>.</p>
+        </div>
+      </div>
     {% else %}
       {% for n in notes %}
         {% set subject_color = n.subject.color or '#94a3b8' %}
@@ -84,7 +90,7 @@
 
             <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" class="details-row__action">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="submit" class="action-link action-link--danger" onclick="return confirm('¿Seguro que quieres borrar este apunte?');">
+              <button type="submit" class="action-link action-link--danger" data-confirm="¿Seguro que quieres borrar este apunte?">
                 Borrar
               </button>
             </form>
