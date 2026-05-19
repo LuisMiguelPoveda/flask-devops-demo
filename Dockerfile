@@ -33,4 +33,7 @@ EXPOSE 5000
 
 ENV FLASK_APP=app
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
+
 CMD ["sh", "-c", "flask db upgrade && gunicorn -b 0.0.0.0:5000 --timeout 300 --workers 2 --threads 4 'app:create_app()'"]

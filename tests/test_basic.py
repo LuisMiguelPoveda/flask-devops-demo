@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from app import create_app
+from app.config import TestingConfig
 from app.models import db, User, Subject, Note, Job, AskProfeMessage, StudentProfile, SubjectExam
 
 
@@ -23,8 +24,9 @@ def flask_app(monkeypatch, tmp_path):
     monkeypatch.setenv("LMSTUDIO_MODEL", "dummy-model")
     monkeypatch.setenv("LMSTUDIO_TIMEOUT", "1")
 
-    app = create_app()
-    app.config.update({"TESTING": True})
+    app = create_app(config=TestingConfig)
+    with app.app_context():
+        db.create_all()
     return app
 
 
@@ -66,6 +68,13 @@ def authed_client(flask_app):
     return client
 
 
+def test_health_endpoint(flask_app):
+    client = flask_app.test_client()
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
 def test_dashboard_requires_login(flask_app):
     client = flask_app.test_client()
     response = client.get("/dashboard")
@@ -76,7 +85,7 @@ def test_dashboard_requires_login(flask_app):
 def test_dashboard_after_login(authed_client):
     response = authed_client.get("/dashboard")
     assert response.status_code == 200
-    assert b"Hola, ada" in response.data
+    assert b"Hola, Ada Lovelace" in response.data
     assert b'href="/ask-profe"' in response.data
 
 

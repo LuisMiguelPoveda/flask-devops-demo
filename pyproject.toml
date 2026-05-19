@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "UP"]
+ignore = ["E501"]  # line length — enforced by line-length setting, not as an error
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # sys.path manipulation before project imports is intentional
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/static/*", "app/templates/*"]
+
+[tool.coverage.report]
+fail_under = 34
+show_missing = true

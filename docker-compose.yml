@@ -27,6 +27,12 @@ services:
       DB_NAME: flask_devops
       DB_USER: flask_user
       DB_PASSWORD_FILE: /run/secrets/postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health')\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:

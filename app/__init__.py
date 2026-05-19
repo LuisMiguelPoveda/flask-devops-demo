@@ -13,11 +13,8 @@ from io import BytesIO
 
 import requests
 from requests.exceptions import Timeout, RequestException
-from markupsafe import Markup, escape
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
-from PyPDF2 import PdfReader
-from pptx import Presentation
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
@@ -36,6 +33,30 @@ from flask_login import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .core.llm_profiles import (
+    LLM_PROFILE_CHOICES,
+    LLM_PROFILE_PRESETS,
+    DEFAULT_LLM_PROFILE,
+    DEFAULT_LLM_LIMITS,
+    DEFAULT_CHUNK_TOKENS,
+    DEFAULT_CHUNK_OVERLAP,
+    FLASHCARD_CHUNK_COUNTS,
+    FLASHCARD_CHUNK_DEFAULT,
+    LLM_OFFLINE_LABEL,
+    TASK_WINDOW_OPTIONS,
+    TASK_WINDOW_VALUES,
+    TASK_WINDOW_LABELS,
+    TASK_WINDOW_DEFAULT,
+)
+from .core.text_processing import chunk_text_with_overlap, estimate_summary_max_tokens, simple_format_note
+from .core.file_extraction import (
+    MAX_UPLOAD_BYTES,
+    allowed_file,
+    save_upload_stream,
+    extract_pdf_text,
+    extract_pptx_text,
+)
+from .core.flashcard_validation import _parse_and_validate_flashcards_json
 from .models import (
     db,
     User,
@@ -52,58 +73,6 @@ from .models import (
 )
 
 
-ALLOWED_EXTENSIONS = {"txt", "pdf", "pptx"}
-# Permitimos hasta ~50 MB por archivo
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-LLM_PROFILE_CHOICES = [
-    {
-        "id": "vram_4gb",
-        "label": "4 GB (conservador)",
-        "chunk_tokens": 1500,
-        "chunk_overlap": 250,
-        "summary_max_tokens": 1200,
-        "summary_min_tokens": 120,
-        "summary_ratio": 0.35,
-    },
-    {
-        "id": "vram_8gb",
-        "label": "8 GB (equilibrado)",
-        "chunk_tokens": 2200,
-        "chunk_overlap": 350,
-        "summary_max_tokens": 2200,
-        "summary_min_tokens": 120,
-        "summary_ratio": 0.45,
-    },
-    {
-        "id": "vram_16gb",
-        "label": "16 GB (alto)",
-        "chunk_tokens": 3000,
-        "chunk_overlap": 500,
-        "summary_max_tokens": 3500,
-        "summary_min_tokens": 120,
-        "summary_ratio": 0.5,
-    },
-]
-LLM_PROFILE_PRESETS = {choice["id"]: choice for choice in LLM_PROFILE_CHOICES}
-DEFAULT_LLM_PROFILE = "vram_4gb"
-DEFAULT_LLM_LIMITS = LLM_PROFILE_PRESETS[DEFAULT_LLM_PROFILE]
-MAX_SUMMARY_TOKENS = DEFAULT_LLM_LIMITS["summary_max_tokens"]
-SUMMARY_MIN_TOKENS = DEFAULT_LLM_LIMITS["summary_min_tokens"]
-SUMMARY_TOKEN_RATIO = DEFAULT_LLM_LIMITS["summary_ratio"]
-DEFAULT_CHUNK_TOKENS = DEFAULT_LLM_LIMITS["chunk_tokens"]
-DEFAULT_CHUNK_OVERLAP = DEFAULT_LLM_LIMITS["chunk_overlap"]
-FLASHCARD_CHUNK_COUNTS = (5, 10, 15, 20)
-FLASHCARD_CHUNK_DEFAULT = FLASHCARD_CHUNK_COUNTS[0]
-TASK_WINDOW_OPTIONS = [
-    {"value": 0, "label": "Todos"},
-    {"value": 7, "label": "1 semana"},
-    {"value": 14, "label": "2 semanas"},
-    {"value": 30, "label": "1 mes"},
-]
-TASK_WINDOW_VALUES = {opt["value"] for opt in TASK_WINDOW_OPTIONS}
-TASK_WINDOW_LABELS = {opt["value"]: opt["label"] for opt in TASK_WINDOW_OPTIONS}
-TASK_WINDOW_DEFAULT = 14
-LLM_OFFLINE_LABEL = "Motor LLM no encontrado"
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # evita arrancar dos workers en procesos reloader
 _worker_started = False
@@ -114,47 +83,6 @@ migrate = Migrate()
 JOB_RETRY_SECONDS = 30
 INCOMPLETE_JOB_STATUSES = ("pending", "running")
 
-
-def chunk_text_with_overlap(
-    text: str,
-    max_tokens: int = DEFAULT_CHUNK_TOKENS,
-    overlap: int = DEFAULT_CHUNK_OVERLAP,
-) -> list[str]:
-    """
-    Corta el texto en fragmentos aproximados de tokens (palabras) con solapamiento
-    para minimizar la pérdida de contexto entre partes.
-    """
-    tokens = (text or "").split()
-    if not tokens:
-        return []
-
-    max_tokens = max(1, max_tokens)
-    overlap = max(0, min(overlap, max_tokens - 1))
-    step = max_tokens - overlap if max_tokens > overlap else 1
-
-    chunks: list[str] = []
-    start = 0
-    while start < len(tokens):
-        end = min(len(tokens), start + max_tokens)
-        chunk_tokens = tokens[start:end]
-        chunks.append(" ".join(chunk_tokens))
-        if end >= len(tokens):
-            break
-        start += step
-    return chunks
-
-
-def estimate_summary_max_tokens(
-    text: str,
-    max_tokens: int = MAX_SUMMARY_TOKENS,
-    min_tokens: int = SUMMARY_MIN_TOKENS,
-    ratio: float = SUMMARY_TOKEN_RATIO,
-) -> int:
-    word_count = len((text or "").split())
-    target = int(word_count * ratio)
-    if target <= 0:
-        target = min_tokens
-    return max(min_tokens, min(max_tokens, target))
 
 
 def normalize_subject_color(value: str | None) -> str | None:
@@ -445,61 +373,6 @@ def build_note_chunks_map(
     return result
 
 
-def simple_format_note(text: str) -> Markup:
-    """
-    Convierte texto plano con encabezados '#' y viñetas '*'/'-' en HTML simple.
-    Soporta **negrita** y *cursiva*. Escapa contenido para evitar XSS.
-    """
-    import re
-    from html import unescape as html_unescape
-
-    lines = html_unescape(text or "").splitlines()
-    html_parts = []
-    in_list = False
-
-    def close_list():
-        nonlocal in_list
-        if in_list:
-            html_parts.append("</ul>")
-            in_list = False
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            close_list()
-            continue
-
-        def fmt_inline(txt: str) -> str:
-            esc = escape(txt)
-            esc = re.sub(r"\*\*(.+?)\*\*", lambda m: f"<strong>{escape(m.group(1))}</strong>", esc)
-            esc = re.sub(r"\*(.+?)\*", lambda m: f"<em>{escape(m.group(1))}</em>", esc)
-            return esc
-
-        if stripped == "---":
-            close_list()
-            html_parts.append("<hr />")
-        elif stripped.startswith("###"):
-            close_list()
-            html_parts.append(f"<h4>{fmt_inline(stripped.lstrip('#').strip())}</h4>")
-        elif stripped.startswith("##"):
-            close_list()
-            html_parts.append(f"<h3>{fmt_inline(stripped.lstrip('#').strip())}</h3>")
-        elif stripped.startswith("#"):
-            close_list()
-            html_parts.append(f"<h2>{fmt_inline(stripped.lstrip('#').strip())}</h2>")
-        elif stripped.startswith(("* ", "- ")):
-            if not in_list:
-                html_parts.append("<ul>")
-                in_list = True
-            html_parts.append(f"<li>{fmt_inline(stripped[2:].strip())}</li>")
-        else:
-            close_list()
-            html_parts.append(f"<p>{fmt_inline(stripped)}</p>")
-
-    close_list()
-    return Markup("".join(html_parts))
-
-
 def fetch_ask_profe_history(user_id: int, limit: int = 12) -> list[dict]:
     rows = (
         AskProfeMessage.query.filter_by(user_id=user_id)
@@ -552,70 +425,6 @@ def is_setup_complete(user_id: int) -> bool:
         return False
     profile = StudentProfile.query.filter_by(user_id=user_id).first()
     return profile is not None
-
-
-def allowed_file(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def save_upload_stream(upload, dest_path: str, max_bytes: int) -> tuple[int, str | None]:
-    total = 0
-    try:
-        with open(dest_path, "wb") as handle:
-            while True:
-                chunk = upload.stream.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > max_bytes:
-                    break
-                handle.write(chunk)
-    except Exception:
-        if os.path.exists(dest_path):
-            os.remove(dest_path)
-        raise
-
-    if total == 0:
-        if os.path.exists(dest_path):
-            os.remove(dest_path)
-        return 0, "empty"
-    if total > max_bytes:
-        if os.path.exists(dest_path):
-            os.remove(dest_path)
-        return total, "too_large"
-    return total, None
-
-
-def extract_pdf_text(file_bytes: bytes) -> str:
-    """Extrae texto simple desde PDF usando PyPDF2."""
-    reader = PdfReader(BytesIO(file_bytes))
-    chunks: list[str] = []
-    for page in reader.pages:
-        try:
-            txt = page.extract_text() or ""
-        except Exception:
-            txt = ""
-        if txt:
-            chunks.append(txt)
-    return "\n".join(chunks)
-
-
-def extract_pptx_text(file_bytes: bytes) -> str:
-    """Extrae texto simple desde PPTX usando python-pptx."""
-    prs = Presentation(BytesIO(file_bytes))
-    chunks: list[str] = []
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if getattr(shape, "has_text_frame", False):
-                text = shape.text_frame.text or ""
-                if text.strip():
-                    chunks.append(text.strip())
-            if getattr(shape, "has_table", False):
-                for row in shape.table.rows:
-                    row_text = " ".join(cell.text.strip() for cell in row.cells if cell.text)
-                    if row_text:
-                        chunks.append(row_text)
-    return "\n".join(chunks)
 
 
 def fetch_models(app):
@@ -749,40 +558,6 @@ def lmstudio_summarize_text(
         [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
         max_tokens=max_tokens,
     )
-
-
-def _parse_and_validate_flashcards_json(raw: str, expected_count: int) -> list[dict]:
-    """
-    Esperamos EXACTAMENTE expected_count flashcards:
-    [
-      {"question": str, "options": [str,str,str,str], "correct_index": 0..3}
-    ]
-    """
-    # A veces el modelo devuelve ```json ... ```
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        # si trae 'json\n'
-        cleaned = cleaned.replace("json\n", "", 1).strip()
-
-    data = json.loads(cleaned)
-
-    if not isinstance(data, list) or len(data) != expected_count:
-        raise ValueError(f"El JSON debe ser una lista de {expected_count} flashcards.")
-
-    for i, card in enumerate(data, start=1):
-        if not isinstance(card, dict):
-            raise ValueError(f"Flashcard {i} no es un objeto JSON.")
-        q = card.get("question")
-        opts = card.get("options")
-        idx = card.get("correct_index")
-        if not isinstance(q, str) or not q.strip():
-            raise ValueError(f"Flashcard {i} tiene 'question' inválida.")
-        if not isinstance(opts, list) or len(opts) != 4 or not all(isinstance(o, str) and o.strip() for o in opts):
-            raise ValueError(f"Flashcard {i} debe tener 4 'options' (strings).")
-        if not isinstance(idx, int) or idx < 0 or idx > 3:
-            raise ValueError(f"Flashcard {i} debe tener 'correct_index' entre 0 y 3.")
-    return data
 
 
 def lmstudio_generate_flashcards(app, model: str, note: Note, count: int = 5, source_text: str | None = None) -> list[dict]:
@@ -1179,8 +954,10 @@ def process_job(app, job: Job):
             return "error", None, f"Error procesando el trabajo: {e}"
 
 
-def create_app():
+def create_app(config=None):
+    from .config import config_from_env
     app = Flask(__name__)
+    app.config.from_object(config or config_from_env())
 
     os.makedirs(app.instance_path, exist_ok=True)
     upload_dir = os.getenv("UPLOAD_DIR") or os.path.join(app.instance_path, "uploads")
@@ -1225,7 +1002,6 @@ def create_app():
         else:
             db_uri = "sqlite:///app.db"
     app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     if db_uri.startswith("sqlite"):
         engine_options = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
         connect_args = engine_options.setdefault("connect_args", {})
@@ -3584,6 +3360,10 @@ def create_app():
         db.session.commit()
         flash("Deck de flashcards borrado ✅", "success")
         return redirect(url_for("flashcards_list"))
+
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "ok"}), 200
 
     return app
 
