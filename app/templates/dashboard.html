@@ -49,6 +49,22 @@
                       Sin asignatura
                     {% endif %}
                   </div>
+                  {% if item.kind == "exam" and item.subject %}
+                    {% set exam_key = (item.date | string) + '_' + (item.subject.id | string) %}
+                    {% set acc = exam_accuracy.get(exam_key) %}
+                    {% if acc %}
+                      {% if acc.pct >= 80 %}
+                        {% set acc_bg = '#dcfce7' %}{% set acc_color = '#14532d' %}
+                      {% elif acc.pct >= 50 %}
+                        {% set acc_bg = '#ffedd5' %}{% set acc_color = '#9a3412' %}
+                      {% else %}
+                        {% set acc_bg = '#fee2e2' %}{% set acc_color = '#7f1d1d' %}
+                      {% endif %}
+                      <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;margin-top:4px;background:{{ acc_bg }};color:{{ acc_color }};">
+                        🏆 {{ acc.pct }}% ({{ acc.count }} reto{{ 's' if acc.count != 1 else '' }})
+                      </span>
+                    {% endif %}
+                  {% endif %}
                 </div>
                 <div style="text-align:right;">
                   <div style="font-weight:700;">{{ item.date }}</div>
@@ -107,6 +123,12 @@
           <div class="menu-icon">🗂️</div>
           <div class="menu-title">Visualizar / Editar flashcards</div>
           <div class="menu-desc">Filtra, edita y borra decks.</div>
+        </a>
+
+        <a class="menu-btn nav-option menu-btn--highlight" href="{{ url_for('challenge') }}">
+          <div class="menu-icon">🏆</div>
+          <div class="menu-title">Reto Diario</div>
+          <div class="menu-desc">Quiz + Contrarreloj con tus flashcards de los próximos exámenes.</div>
         </a>
 
         <a class="menu-btn nav-option" href="{{ url_for('task_calendar') }}">

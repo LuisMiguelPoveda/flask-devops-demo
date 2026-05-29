@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+{% block title %}Reto Diario{% endblock %}
+
+{% block content %}
+<style>
+  /* Reuse study-option styles with !important to beat global button rule */
+  #ch-root .study-options { display: grid !important; grid-template-columns: 1fr !important; gap: 10px; padding: 0; margin: 0; }
+  #ch-root .study-option   { display: block !important; width: 100% !important; padding: 14px 18px !important;
+                    border-radius: 12px !important; border: 2px solid rgba(0,0,0,.15) !important;
+                    background: #fff !important; color: #111 !important; cursor: pointer;
+                    font-size: 15px !important; font-weight: 500 !important; line-height: 1.45;
+                    text-align: left !important; transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease; }
+  #ch-root .study-option:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,.12); border-color: rgba(59,130,246,.5) !important; }
+  #ch-root .study-option:disabled { cursor: default; }
+  #ch-root .study-option.is-correct { background: #dcfce7 !important; border-color: #16a34a !important; color: #14532d !important; font-weight: 700 !important; }
+  #ch-root .study-option.is-wrong   { background: #fee2e2 !important; border-color: #dc2626 !important; color: #7f1d1d !important; font-weight: 700 !important; }
+
+  .ch-timer-wrap  { position:relative; height:12px; background:rgba(0,0,0,.08); border-radius:6px; overflow:hidden; margin-bottom:8px; }
+  .ch-timer-bar   { height:100%; background:linear-gradient(90deg,#22c55e,#84cc16); border-radius:6px; transition:width 1s linear, background 0.5s ease; }
+  .ch-timer-label { font-size:32px; font-weight:800; text-align:center; color:#0f172a; margin-bottom:8px; font-variant-numeric:tabular-nums; }
+  .ch-delta       { text-align:center; font-size:20px; font-weight:800; margin-top:8px;
+                    animation:ch-delta-pop 0.7s ease forwards; }
+  .ch-delta--pos  { color:#16a34a; }
+  .ch-delta--neg  { color:#dc2626; }
+  @keyframes ch-delta-pop {
+    0%   { transform:scale(0.7) translateY(0);   opacity:1; }
+    55%  { transform:scale(1.2) translateY(-8px); opacity:1; }
+    100% { transform:scale(1)   translateY(-20px);opacity:0; }
+  }
+</style>
+
+<section class="shell">
+  <header class="section-header">
+    <div>
+      <h1 class="headline">Reto Diario</h1>
+      <p class="subtle">Quiz + Contrarreloj con tus flashcards más próximas.</p>
+    </div>
+    <a class="link-pill" href="{{ url_for('dashboard') }}">← Menú</a>
+  </header>
+
+  {% if no_cards %}
+    <div class="card">
+      <div class="empty-state">
+        <span class="empty-state__icon">🏆</span>
+        {% if reason == "not_enough_subjects" %}
+          <p>No hay suficientes flashcards para el reto.</p>
+          <p class="empty-state__hint">Necesitas flashcards de al menos 2 asignaturas con examen dentro del período activo.</p>
+        {% else %}
+          <p>No hay exámenes en el período activo.</p>
+          <p class="empty-state__hint">Configura el período de visualización en <a href="{{ url_for('options') }}">Opciones</a> o añade exámenes al calendario.</p>
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <div class="card" id="ch-root">
+
+      <!-- Intro -->
+      <div id="ch-intro">
+        <div class="empty-state">
+          <span class="empty-state__icon">🏆</span>
+          <p style="font-size:20px;font-weight:800;margin:0;color:#0f172a;">¡Reto Diario!</p>
+          <p class="empty-state__hint">2 rondas con flashcards de tus próximos exámenes.</p>
+        </div>
+        <div style="display:grid;gap:8px;max-width:420px;margin:16px auto;">
+          <div style="padding:10px 14px;border-radius:10px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);">
+            <strong>Ronda 1 · Quiz</strong> — 10 preguntas, sin límite de tiempo.
+          </div>
+          <div style="padding:10px 14px;border-radius:10px;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.3);">
+            <strong>Ronda 2 · Contrarreloj</strong> — 2 min de base. Acierto <strong style="color:#16a34a;">+5 s</strong>, fallo <strong style="color:#dc2626;">−5 s</strong>.
+          </div>
+        </div>
+        <div style="text-align:center;margin-top:8px;">
+          <button type="button" id="ch-start" class="link-pill link-pill--accent" style="font-size:16px;padding:14px 32px;">Empezar Reto →</button>
+        </div>
+      </div>
+
+      <!-- Quiz round -->
+      <div id="ch-quiz" hidden>
+        <div class="study-progress"><div class="study-progress__bar" id="q-bar"></div></div>
+        <div class="study-counter" id="q-counter"></div>
+        <p class="study-question" id="q-question"></p>
+        <div class="study-options" id="q-options"></div>
+        <button type="button" class="study-next" id="q-next" hidden>Siguiente →</button>
+      </div>
+
+      <!-- Quiz done / blitz intro -->
+      <div id="ch-quiz-done" hidden>
+        <div class="empty-state">
+          <span class="empty-state__icon" id="qd-icon"></span>
+          <p id="qd-text" style="font-size:20px;font-weight:800;margin:0;color:#0f172a;"></p>
+          <p class="empty-state__hint" id="qd-sub"></p>
+        </div>
+        <div style="text-align:center;margin-top:16px;">
+          <button type="button" id="ch-start-blitz" class="link-pill link-pill--accent" style="font-size:16px;padding:14px 32px;">Iniciar Contrarreloj →</button>
+        </div>
+      </div>
+
+      <!-- Blitz round -->
+      <div id="ch-blitz" hidden>
+        <div class="ch-timer-wrap"><div class="ch-timer-bar" id="b-bar"></div></div>
+        <div class="ch-timer-label" id="b-timer">2:00</div>
+        <div class="study-counter" id="b-counter"></div>
+        <p class="study-question" id="b-question"></p>
+        <div class="study-options" id="b-options"></div>
+        <div id="b-delta" class="ch-delta" hidden></div>
+      </div>
+
+      <!-- Final results -->
+      <div id="ch-done" hidden>
+        <div class="empty-state">
+          <span class="empty-state__icon" id="d-icon"></span>
+          <p id="d-title" style="font-size:20px;font-weight:800;margin:0;color:#0f172a;">¡Reto completado!</p>
+          <p class="empty-state__hint" id="d-sub"></p>
+        </div>
+        <div style="display:grid;gap:8px;max-width:360px;margin:16px auto;">
+          <div id="d-quiz-stat" style="padding:10px 14px;border-radius:10px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);"></div>
+          <div id="d-blitz-stat" style="padding:10px 14px;border-radius:10px;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.3);"></div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap;">
+          <button type="button" id="ch-restart" class="link-pill link-pill--accent">Repetir</button>
+          <a class="link-pill" href="{{ url_for('dashboard') }}">← Volver</a>
+        </div>
+      </div>
+
+    </div>
+  {% endif %}
+</section>
+
+{% if not no_cards %}
+<script>
+(function () {
+  var raw = {{ cards_json | tojson }};
+  var DECK_IDS    = {{ deck_ids    | tojson }};
+  var SUBJECT_IDS = {{ subject_ids | tojson }};
+  var EXAM_DATES  = {{ exam_dates  | tojson }};
+
+  var QUIZ_COUNT  = 10;
+  var BLITZ_BASE  = 120;
+  var BLITZ_PLUS  = 5;
+  var BLITZ_MINUS = 5;
+
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
+
+  // State
+  var quizCards, blitzCards;
+  var quizIdx, quizScore;
+  var blitzIdx, blitzScore, blitzTotal, blitzSecs;
+  var blitzTimer = null;
+  var examStats = {};  // {"2026-06-15": {correct:N, total:N}, ...}
+
+  function recordExamAnswer(examKey, correct) {
+    var key = examKey || '__none__';
+    if (!examStats[key]) examStats[key] = { correct: 0, total: 0 };
+    examStats[key].total++;
+    if (correct) examStats[key].correct++;
+  }
+
+  function initCards() {
+    var all = shuffle(raw.slice());
+    quizCards  = all.slice(0, Math.min(QUIZ_COUNT, all.length));
+    blitzCards = shuffle(raw.slice());
+    quizIdx    = 0;  quizScore  = 0;
+    blitzIdx   = 0;  blitzScore = 0;  blitzTotal = 0;
+    blitzSecs  = BLITZ_BASE;
+    examStats  = {};
+  }
+
+  var screens = {
+    intro:     document.getElementById('ch-intro'),
+    quiz:      document.getElementById('ch-quiz'),
+    quizDone:  document.getElementById('ch-quiz-done'),
+    blitz:     document.getElementById('ch-blitz'),
+    done:      document.getElementById('ch-done'),
+  };
+
+  function showOnly(key) {
+    Object.keys(screens).forEach(function (k) { screens[k].hidden = (k !== key); });
+  }
+
+  /* ---- QUIZ ---- */
+  function renderQuizCard() {
+    var bar       = document.getElementById('q-bar');
+    var counter   = document.getElementById('q-counter');
+    var questionEl = document.getElementById('q-question');
+    var optionsEl  = document.getElementById('q-options');
+    var nextBtn    = document.getElementById('q-next');
+
+    bar.style.width = ((quizIdx / quizCards.length) * 100) + '%';
+    counter.textContent = 'Pregunta ' + (quizIdx + 1) + ' de ' + quizCards.length;
+
+    var card = quizCards[quizIdx];
+    questionEl.textContent = card.question;
+    optionsEl.innerHTML = '';
+    nextBtn.hidden = true;
+
+    var indices = card.options.map(function (_, i) { return i; });
+    shuffle(indices);
+    indices.forEach(function (origIdx) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'study-option';
+      btn.textContent = card.options[origIdx];
+      btn.dataset.correct = origIdx === card.correct_index ? '1' : '0';
+      btn.addEventListener('click', function () {
+        optionsEl.querySelectorAll('.study-option').forEach(function (opt) {
+          opt.disabled = true;
+          if (opt.dataset.correct === '1') opt.classList.add('is-correct');
+        });
+        var correct = btn.dataset.correct === '1';
+        if (!correct) btn.classList.add('is-wrong');
+        else quizScore++;
+        recordExamAnswer(card.exam_key, correct);
+        nextBtn.hidden = false;
+      });
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  document.getElementById('q-next').addEventListener('click', function () {
+    quizIdx++;
+    if (quizIdx >= quizCards.length) showQuizDone();
+    else renderQuizCard();
+  });
+
+  function showQuizDone() {
+    var pct = Math.round((quizScore / quizCards.length) * 100);
+    document.getElementById('qd-icon').textContent = pct >= 80 ? '🏆' : pct >= 50 ? '👍' : '📖';
+    document.getElementById('qd-text').textContent = quizScore + ' / ' + quizCards.length + ' correctas';
+    document.getElementById('qd-sub').textContent  = pct + '% — ' + (
+      pct >= 80 ? '¡Excelente! Prepárate para el contrarreloj.' :
+      pct >= 50 ? 'Bien. A ver cómo vas con el tiempo.' :
+                  'Sigue practicando. El contrarreloj pondrá a prueba la velocidad.'
+    );
+    showOnly('quizDone');
+  }
+
+  /* ---- BLITZ ---- */
+  function fmt(secs) {
+    if (secs < 0) secs = 0;
+    var m = Math.floor(secs / 60), s = secs % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function updateTimer() {
+    var bar   = document.getElementById('b-bar');
+    var label = document.getElementById('b-timer');
+    label.textContent = fmt(blitzSecs);
+    var pct = Math.min(100, Math.max(0, (blitzSecs / BLITZ_BASE) * 100));
+    bar.style.width = pct + '%';
+    if (pct > 50)      bar.style.background = 'linear-gradient(90deg,#22c55e,#84cc16)';
+    else if (pct > 20) bar.style.background = 'linear-gradient(90deg,#eab308,#f97316)';
+    else               bar.style.background = '#dc2626';
+  }
+
+  function showDelta(text, positive) {
+    var el = document.getElementById('b-delta');
+    el.textContent = text;
+    el.className = 'ch-delta ' + (positive ? 'ch-delta--pos' : 'ch-delta--neg');
+    el.hidden = false;
+    void el.offsetWidth;
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+  }
+
+  function renderBlitzCard() {
+    var counter    = document.getElementById('b-counter');
+    var questionEl = document.getElementById('b-question');
+    var optionsEl  = document.getElementById('b-options');
+    document.getElementById('b-delta').hidden = true;
+
+    var card = blitzCards[blitzIdx % blitzCards.length];
+    counter.textContent = 'Pregunta ' + (blitzIdx + 1);
+    questionEl.textContent = card.question;
+    optionsEl.innerHTML = '';
+
+    var indices = card.options.map(function (_, i) { return i; });
+    shuffle(indices);
+    indices.forEach(function (origIdx) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'study-option';
+      btn.textContent = card.options[origIdx];
+      btn.dataset.correct = origIdx === card.correct_index ? '1' : '0';
+      btn.addEventListener('click', function () {
+        optionsEl.querySelectorAll('.study-option').forEach(function (opt) {
+          opt.disabled = true;
+          if (opt.dataset.correct === '1') opt.classList.add('is-correct');
+        });
+        blitzTotal++;
+        var bCorrect = btn.dataset.correct === '1';
+        recordExamAnswer(card.exam_key, bCorrect);
+        if (bCorrect) {
+          blitzScore++;
+          blitzSecs = Math.min(blitzSecs + BLITZ_PLUS, BLITZ_BASE * 2);
+          btn.classList.add('is-correct');
+          showDelta('+' + BLITZ_PLUS + 's', true);
+        } else {
+          btn.classList.add('is-wrong');
+          blitzSecs = Math.max(0, blitzSecs - BLITZ_MINUS);
+          showDelta('−' + BLITZ_MINUS + 's', false);
+        }
+        updateTimer();
+        if (blitzSecs <= 0) {
+          clearInterval(blitzTimer); blitzTimer = null;
+          setTimeout(showDone, 600);
+          return;
+        }
+        setTimeout(function () { blitzIdx++; renderBlitzCard(); }, 700);
+      });
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function startBlitz() {
+    blitzIdx = 0; blitzScore = 0; blitzTotal = 0; blitzSecs = BLITZ_BASE;
+    showOnly('blitz');
+    updateTimer();
+    renderBlitzCard();
+    if (blitzTimer) clearInterval(blitzTimer);
+    blitzTimer = setInterval(function () {
+      blitzSecs--;
+      updateTimer();
+      if (blitzSecs <= 0) {
+        clearInterval(blitzTimer); blitzTimer = null;
+        document.getElementById('b-options').querySelectorAll('.study-option').forEach(function (b) { b.disabled = true; });
+        setTimeout(showDone, 600);
+      }
+    }, 1000);
+  }
+
+  function showDone() {
+    if (blitzTimer) { clearInterval(blitzTimer); blitzTimer = null; }
+    var qTotal   = quizCards.length;
+    var qPct     = Math.round((quizScore  / qTotal)     * 100);
+    var bPct     = blitzTotal > 0 ? Math.round((blitzScore / blitzTotal) * 100) : 0;
+    var combined = Math.round(((quizScore + blitzScore) / (qTotal + (blitzTotal || 1))) * 100);
+
+    document.getElementById('d-icon').textContent  = combined >= 75 ? '🏆' : combined >= 50 ? '👍' : '📖';
+    document.getElementById('d-sub').textContent   = combined + '% global — ' + (
+      combined >= 75 ? '¡Excelente trabajo!' : combined >= 50 ? 'Buen esfuerzo, sigue practicando.' : 'Repasa el tema e inténtalo de nuevo.'
+    );
+    document.getElementById('d-quiz-stat').innerHTML  = '<strong>Quiz:</strong> ' + quizScore + '/' + qTotal + ' correctas (' + qPct + '%)';
+    document.getElementById('d-blitz-stat').innerHTML = '<strong>Contrarreloj:</strong> ' + blitzScore + '/' + blitzTotal + ' correctas (' + bPct + '%) · ' + fmt(blitzSecs) + ' restantes';
+    showOnly('done');
+
+    fetch('{{ url_for("challenge_save") }}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': '{{ csrf_token() }}'
+      },
+      body: JSON.stringify({
+        deck_ids:        DECK_IDS,
+        subject_ids:     SUBJECT_IDS,
+        exam_dates:      EXAM_DATES,
+        quiz_correct:    quizScore,
+        quiz_total:      qTotal,
+        blitz_correct:   blitzScore,
+        blitz_total:     blitzTotal,
+        blitz_seconds:   blitzSecs,
+        per_exam_stats:  examStats,
+      })
+    });
+  }
+
+  /* ---- wiring ---- */
+  document.getElementById('ch-start').addEventListener('click', function () {
+    initCards(); showOnly('quiz'); renderQuizCard();
+  });
+  document.getElementById('ch-start-blitz').addEventListener('click', startBlitz);
+  document.getElementById('ch-restart').addEventListener('click', function () {
+    initCards(); showOnly('intro');
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

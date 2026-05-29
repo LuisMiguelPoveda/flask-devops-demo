@@ -8,6 +8,7 @@ from flask_login import current_user, login_required
 
 from app.core.llm_profiles import TASK_WINDOW_LABELS
 from app.models import (
+    ChallengeResult,
     FlashcardDeck,
     Job,
     Note,
@@ -31,6 +32,39 @@ def dashboard():
     calendar_items = build_calendar_items(current_user.id, window_start, window_end, window_start)
     calendar_label = TASK_WINDOW_LABELS.get(window_days, f"{window_days} días")
     queue_groups = build_queue_groups(current_user.id)
+
+    # Per-exam challenge accuracy (last 5 results per exam_date in window)
+    exam_accuracy = {}
+    if window_start and window_end:
+        exam_items = [item for item in calendar_items if item["kind"] == "exam"]
+        if exam_items:
+            recent_results = (
+                ChallengeResult.query
+                .filter_by(user_id=current_user.id)
+                .order_by(ChallengeResult.created_at.desc())
+                .limit(100)
+                .all()
+            )
+            for item in exam_items:
+                edate_str = str(item["date"])
+                subject_id = item["subject"].id if item["subject"] else None
+                exam_key = f"{edate_str}_{subject_id}"
+                matching = [
+                    r for r in recent_results
+                    if edate_str in (r.exam_dates or [])
+                ][:5]
+                if matching:
+                    total_correct = 0
+                    total_q = 0
+                    for r in matching:
+                        es = (r.per_exam_stats or {}).get(exam_key)
+                        if es:
+                            total_correct += es.get("correct", 0)
+                            total_q += es.get("total", 0)
+                    if total_q > 0:
+                        pct = round(total_correct / total_q * 100)
+                        exam_accuracy[exam_key] = {"pct": pct, "count": len(matching)}
+
     return render_template(
         "dashboard.html",
         student_name=student_name,
@@ -39,6 +73,7 @@ def dashboard():
         calendar_window_label=calendar_label,
         calendar_window_start=window_start,
         calendar_window_end=window_end,
+        exam_accuracy=exam_accuracy,
     )
 
 

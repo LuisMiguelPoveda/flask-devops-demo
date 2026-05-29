@@ -208,3 +208,23 @@ class TaskItem(db.Model):
     __table_args__ = (
         db.Index("ix_tasks_user_due", "user_id", "due_date"),
     )
+
+
+class ChallengeResult(db.Model):
+    __tablename__ = "challenge_results"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    deck_ids = db.Column(db.JSON, nullable=False)
+    subject_ids = db.Column(db.JSON, nullable=False)
+    exam_dates = db.Column(db.JSON, nullable=False)
+    quiz_correct = db.Column(db.Integer, nullable=False)
+    quiz_total = db.Column(db.Integer, nullable=False)
+    blitz_correct = db.Column(db.Integer, nullable=False)
+    blitz_total = db.Column(db.Integer, nullable=False)
+    blitz_seconds = db.Column(db.Integer, nullable=False)
+    # {"2026-06-15": {"correct": 7, "total": 10}, ...} — one entry per exam_date
+    per_exam_stats = db.Column(db.JSON, nullable=True)
+
+    user = db.relationship("User")

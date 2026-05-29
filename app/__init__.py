@@ -256,6 +256,7 @@ def create_app(config=None):
     from .blueprints.profe import profe_bp
     from .blueprints.notes import notes_bp
     from .blueprints.flashcards import flashcards_bp
+    from .blueprints.challenge import challenge_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -265,6 +266,7 @@ def create_app(config=None):
     app.register_blueprint(profe_bp)
     app.register_blueprint(notes_bp)
     app.register_blueprint(flashcards_bp)
+    app.register_blueprint(challenge_bp)
 
     # Register short endpoint aliases so url_for("login") works alongside url_for("auth.login").
     # Blueprints prefix every endpoint with "<blueprint_name>.", which would break templates and
